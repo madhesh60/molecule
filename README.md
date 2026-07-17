@@ -64,11 +64,11 @@ No external vector DB. No internet required.
 
 ## Install from zero
 
-**Requirements:** Python 3.11+
+**Requirements:** Python 3.10+
 
 ```bash
 # 1. Clone
-git clone https://github.com/yourname/molecule
+git clone https://github.com/rajmadhesh/molecule
 cd molecule
 
 # 2. Install (editable, with dev tools)

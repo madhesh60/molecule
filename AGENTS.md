@@ -222,7 +222,7 @@ CREATE TABLE session_telemetry (
 
 ## 8. Tech stack decisions (and why)
 
-- **Python 3.11+** — Standard developer environments, fastest path to build clean and reusable code.
+- **Python 3.10+** — Standard developer environments, fastest path to build clean and reusable code.
 - **MCP Python SDK / FastMCP** — Official pattern, works across Claude Code, Cursor, and custom agents with no adapter code.
 - **SQLite (+ a vector extension like `sqlite-vec` or pure Python fallback)** — Zero external services, single local file. Molecule works completely offline for data privacy, speed, and network resilience.
 - **Embeddings**: Default to a small local model (e.g. `sentence-transformers` all-MiniLM) for offline execution; allow swapping to cloud embeddings via a config flag for production flexibility.
@@ -282,7 +282,7 @@ CREATE TABLE session_telemetry (
 
 ## 14. Coding conventions for any agent working on this repo
 
-- Python 3.11+, type hints required on all public functions.
+- Python 3.10+, type hints required on all public functions.
 - `pytest` for tests, `ruff` for lint — both must pass before a change is considered done.
 - Keep the MCP tool functions thin; put real logic in a separate `core/` package so it's testable without spinning up an MCP server.
 - Store the local DB at `.molecule/store.db` relative to the target repo — same idea as a `.git` folder, invisible until you look for it.
