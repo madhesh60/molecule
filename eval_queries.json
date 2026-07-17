@@ -1,0 +1,22 @@
+[
+  {"query": "give me the one paragraph pitch for this project", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:1. One-paragraph pitch"},
+  {"query": "what pain points does molecule solve", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:2. The problem, in plain terms"},
+  {"query": "how does molecule compare to mem0 and letta memgpt", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:3. What already exists — do NOT rebuild these, build on the gap between them"},
+  {"query": "what makes this project novel and its core value proposition", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:4. Novelty & Core Value Proposition"},
+  {"query": "show me the architecture flowchart of the system", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:5. Architecture"},
+  {"query": "how does the auto chunker split markdown by headings", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:6. Core modules:6.1 Auto-Chunker"},
+  {"query": "how does the router do selective retrieval with top k", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:6. Core modules:6.2 Router / Selective Retrieval"},
+  {"query": "how are session memories stored and deduplicated", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:6. Core modules:6.3 Session Memory Store"},
+  {"query": "which MCP tools does the server expose like mol_search", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:6. Core modules:6.4 MCP Tool Interface"},
+  {"query": "how is the token savings telemetry percentage tracked", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:6. Core modules:6.5 Token-Savings Telemetry"},
+  {"query": "what is the sqlite data model and table schema", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:7. Data model (SQLite)"},
+  {"query": "why python fastmcp and sqlite as the tech stack", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:8. Tech stack decisions (and why)"},
+  {"query": "what are the non goals and scope fence for the MVP", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:9. Non-goals (explicit scope fence — do not build these for MVP)"},
+  {"query": "what are the build plan phases and milestones", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:10. Build plan / milestones"},
+  {"query": "how do I verify the reference walkthrough end to end", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:11. Verification and Reference Walkthrough"},
+  {"query": "what retrieval precision and speed benchmarks must pass", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:12. Retrieval Performance and Speed Benchmarks"},
+  {"query": "what are the known risks and their mitigations", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:13. Known risks + mitigations"},
+  {"query": "what coding conventions must agents follow in this repo", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:14. Coding conventions for any agent working on this repo"},
+  {"query": "what is the definition of done checklist for the core MVP", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:15. Definition of Done for Core MVP"},
+  {"query": "how do we keep the module lightweight with a small local embedding model", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:17. Keeping it Lightweight and Robust:Stay Lightweight"}
+]
