@@ -2,7 +2,22 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
+
+
+def utc_now() -> datetime:
+    """Timezone-aware UTC now — datetime.utcnow() is deprecated in 3.12+."""
+    return datetime.now(timezone.utc)
+
+
+def utc_now_iso() -> str:
+    """UTC timestamp in SQLite's own format ('YYYY-MM-DD HH:MM:SS').
+
+    Using the same textual format as datetime('now') makes string comparison
+    in SQL exact. (isoformat()'s 'T' separator sorts AFTER a space, which
+    silently delayed expiry checks by up to a day.)"""
+    return utc_now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def get_connection(db_path: Path) -> sqlite3.Connection:
@@ -77,6 +92,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
     # In-place upgrades for DBs created before these columns existed.
     _ensure_column(conn, "chunks", "learned_weight", "REAL NOT NULL DEFAULT 1.0")
     _ensure_column(conn, "chunks", "embedding_text_version", "INTEGER NOT NULL DEFAULT 1")
+    # Normalize legacy isoformat timestamps ('T' separator) to SQLite format so
+    # string comparisons against datetime('now') are exact.
+    conn.execute(
+        "UPDATE memories SET expires_at = replace(expires_at, 'T', ' ') "
+        "WHERE expires_at LIKE '%T%'"
+    )
     conn.commit()
 
 

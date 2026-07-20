@@ -1,0 +1,14 @@
+[
+  {"query": "my agent keeps grabbing the wrong section, what's the escape hatch", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:13. Known risks + mitigations"},
+  {"query": "how do I stop it from saving my API key into the notebook", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:13. Known risks + mitigations"},
+  {"query": "is it fine to add FAISS or a fancy nearest neighbor index", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:17. Keeping it Lightweight and Robust:Stay Lightweight"},
+  {"query": "the bill for my LLM calls is huge every single session", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:2. The problem, in plain terms"},
+  {"query": "it forgets everything I told it last time and I hate repeating myself", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:2. The problem, in plain terms"},
+  {"query": "who are the competitors already in this space", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:3. What already exists — do NOT rebuild these, build on the gap between them"},
+  {"query": "why not just use a hosted service and a real database", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:8. Tech stack decisions (and why)"},
+  {"query": "which functions can an agent actually call over the wire", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:6. Core modules:6.4 MCP Tool Interface §1"},
+  {"query": "one new column plus one small check, not a whole new system", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:16. Improvements §1"},
+  {"query": "before writing a note down, make sure it isn't a near copy of one I already have", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:6. Core modules:6.3 Session Memory Store"},
+  {"query": "prove to me the thing actually saves money with a real demo", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:11. Verification and Reference Walkthrough"},
+  {"query": "how fast does it need to redo a giant file after I edit one paragraph", "expected_chunk_id": "AGENTS.md::AGENTS.md — Project: Molecule:12. Retrieval Performance and Speed Benchmarks"}
+]

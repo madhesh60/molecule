@@ -12,6 +12,7 @@ A terminal narrative that walks through everything Molecule does:
 Run:  python demo.py   (or: make demo)
 """
 from __future__ import annotations
+
 import io
 import shutil
 import sys

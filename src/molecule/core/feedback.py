@@ -15,9 +15,9 @@ top-k regardless of score).
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
 
 from molecule.config import MoleculeConfig
+from molecule.db import utc_now_iso
 
 
 def record_feedback(
@@ -35,7 +35,7 @@ def record_feedback(
 
     conn.execute(
         "INSERT INTO chunk_feedback (chunk_id, useful, query, ts) VALUES (?,?,?,?)",
-        (chunk_id, int(useful), query, datetime.utcnow().isoformat()),
+        (chunk_id, int(useful), query, utc_now_iso()),
     )
 
     current = float(row["learned_weight"] or 1.0)

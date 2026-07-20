@@ -331,7 +331,11 @@ A scheduled job (run every N ingests, or on startup): find memory clusters with 
 where `learned_weight` comes from `mol_feedback` votes (bounded EMA). Chunks embed
 heading path + summary + content together (versioned via `embedding_text_version`
 — old DBs auto re-embed on next ingest, learned weights preserved). `mem_extract`
-implements the §6.3 extraction pass without requiring an LLM.
+implements the §6.3 extraction pass without requiring an LLM. BM25 and heading
+match additionally expand query tokens into generic concept-cluster siblings
+(`core/expansion.py`, reduced weight, no LLM) — paraphrased queries hit 12/12 on
+the adversarial eval set while the main set stays 20/20. The hot search path is
+memoized per connection (`core/cache.py`), invalidated automatically on writes.
 
 
 ## 17. Keeping it Lightweight and Robust

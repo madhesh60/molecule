@@ -55,8 +55,12 @@ score = (0.6 × embedding + 0.3 × BM25 keyword + 0.15 × heading match) × lear
 
 - **Embeddings**: local `all-MiniLM-L6-v2` (~80MB, CPU-only, no API key). Each chunk embeds its *heading path + summary + content* together — much stronger routing signal than raw content alone.
 - **BM25-lite keyword scoring**: hand-rolled IDF-weighted BM25 (~30 lines, numpy-free), normalized per-query so it shares a [0,1] band with cosine similarity.
+- **Query expansion**: each query token pulls in its concept-cluster siblings (key→secret/token/credential, forget→memory/recall, …) as reduced-weight terms — so a paraphrased question still finds the section that answers it, while exact wording always dominates. Generic developer vocabulary, works on any corpus, no LLM call.
 - **Heading match boost**: query terms that appear in the section heading count extra.
 - **Learned weight**: adjusted by `mol_feedback` votes via a bounded EMA (clamped 0.5–1.5) — useful chunks rise, useless ones sink, and one vote can never dominate.
+- **Hot-path caching**: corpus state (embedding matrix, BM25 index) is memoized per connection and invalidated automatically on any write; repeat query embeddings are LRU-cached. A search costs one query embedding + one matrix multiply.
+
+Measured on this repo's own `AGENTS.md`: **20/20** on the labeled eval set and **12/12** on an adversarial paraphrase set (queries sharing almost no vocabulary with their target section). A 5,000-line document embeds in ~4s; editing one section re-ingests in ~0.13s.
 
 No external vector DB. No internet required.
 
@@ -104,10 +108,14 @@ make check        # lint + tests + eval — the full gate
 **What the tests cover:**
 - `test_chunker.py` — heading parsing, token boundary splits, `always_include` detection, hash stability
 - `test_scoring.py` — BM25 term weighting, normalization, heading-match scores
+- `test_expansion.py` — concept-cluster expansion: paraphrases reach synonym docs, exact matches always win
 - `test_retriever.py` — router index never loads full content, search returns `reason` field, fetch returns content
+- `test_cache.py` — hot-path cache hits, write invalidation (own + external connections), telemetry writes don't evict
+- `test_labeler.py` — structure-aware labels: tables, code, SQL DDL, bold phrases, fence-skipping
 - `test_feedback.py` — EMA math, clamping, persistence, feedback flipping a ranking
 - `test_extractor.py` — cue classification, confidence assignment, expiry routing, secret redaction, dedup
 - `test_memory.py` — dedup, conflict replacement, secret redaction, expiry
+- `test_hardening.py` — empty/binary/missing files, invalid inputs, fetch ordering
 - `test_telemetry.py` — savings % arithmetic, accumulation across calls
 - `test_db.py` / `test_config.py` — schema migration in place, config.json + env precedence
 - `test_eval.py` — precision harness + a slow integration test against the real AGENTS.md
@@ -320,16 +328,19 @@ src/molecule/
     ├── chunker.py     heading split → sentence overflow → merge small
     ├── embed_text.py  heading+summary+content embedding text (versioned)
     ├── embedder.py    local sentence-transformers, lazy singleton, hash-skip
-    ├── scoring.py     BM25-lite + heading-match scoring
-    ├── labeler.py     hash-cached summaries, swappable LLM fn
+    ├── scoring.py     BM25-lite + heading-match scoring (two-tier terms)
+    ├── expansion.py   concept-cluster query expansion (no LLM)
+    ├── cache.py       versioned per-connection corpus cache (hot path)
+    ├── labeler.py     structure-aware hash-cached labels, swappable LLM fn
     ├── retriever.py   hybrid ranking, learned weights, reason field
     ├── feedback.py    self-learning router (bounded EMA)
     ├── extractor.py   heuristic fact extraction from transcripts
     ├── memory.py      dedup, conflict replace, expiry, secret redaction
     └── telemetry.py   per-session token savings counter
 
-tests/                 test_chunker · test_scoring · test_retriever · test_feedback
-                       test_extractor · test_memory · test_telemetry · test_eval
+tests/                 test_chunker · test_scoring · test_expansion · test_retriever
+                       test_cache · test_labeler · test_feedback · test_extractor
+                       test_memory · test_hardening · test_telemetry · test_eval
                        test_db · test_config
 ```
 

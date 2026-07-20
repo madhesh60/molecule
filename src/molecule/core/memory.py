@@ -6,18 +6,26 @@ from __future__ import annotations
 import re
 import sqlite3
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Callable
 
 import numpy as np
 
 from molecule.config import MoleculeConfig
-from molecule.core.embedder import cosine_similarity, embed, load_embeddings
+from molecule.core.embedder import cosine_similarity, embed, embed_query, load_embeddings
 from molecule.core.scoring import bm25_scores
+from molecule.db import utc_now, utc_now_iso
 
 _SECRET_RE = re.compile(
-    r"(sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36}|[A-Za-z0-9+/]{40,}={0,2}"
-    r"|password\s*[:=]\s*\S+|token\s*[:=]\s*\S+|secret\s*[:=]\s*\S+)",
+    r"(sk-[A-Za-z0-9_-]{20,}"                      # OpenAI/Anthropic-style keys
+    r"|(?:ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]{36,}"  # GitHub tokens
+    r"|AKIA[0-9A-Z]{16}"                            # AWS access key id
+    r"|xox[baprs]-[A-Za-z0-9-]{10,}"                # Slack tokens
+    r"|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}"  # JWT
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"          # PEM private keys
+    r"|[A-Za-z0-9+/]{40,}={0,2}"                    # long base64 blobs
+    r"|(?:password|passwd|pwd|token|secret|api[_-]?key|authorization)\s*[:=]\s*\S+"
+    r"|://[^/\s:@]+:[^/\s:@]+@)",                   # creds in connection URLs
     re.IGNORECASE,
 )
 
@@ -52,6 +60,9 @@ def expire_stale(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+_VALID_MEM_TYPES = {"preference", "task_state"}
+
+
 def write_memory(
     text: str,
     source_task: str,
@@ -60,6 +71,11 @@ def write_memory(
     config: MoleculeConfig,
     mem_type: str = "preference",
 ) -> dict:
+    if mem_type not in _VALID_MEM_TYPES:
+        return {"error": f"invalid mem_type: {mem_type!r} (use 'preference' or 'task_state')"}
+    # Clamp instead of erroring — callers (and LLMs) send 90 meaning 0.9.
+    confidence = max(0.0, min(1.0, float(confidence)))
+
     clean = _redact(text.strip())
     if not clean:
         return {"error": "empty text after redaction"}
@@ -85,10 +101,12 @@ def write_memory(
             )
 
     memory_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat()
+    now = utc_now_iso()
     expires_at = None
     if mem_type == "task_state":
-        expires_at = (datetime.utcnow() + timedelta(days=config.task_state_expiry_days)).isoformat()
+        expires_at = (utc_now() + timedelta(days=config.task_state_expiry_days)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
 
     weight = 1.0 if confidence >= config.low_confidence_threshold else 0.6
 
@@ -109,7 +127,7 @@ def search_memories(
     conn: sqlite3.Connection,
     config: MoleculeConfig,
 ) -> list[dict]:
-    q_vec = embed([query], config.embedding_model)[0]
+    q_vec = embed_query(query, config.embedding_model)
     ids, matrix = load_embeddings(
         conn, "memories", "memory_id",
         filter_clause="status='active' AND (expires_at IS NULL OR expires_at > datetime('now'))"

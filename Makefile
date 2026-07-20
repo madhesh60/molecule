@@ -1,4 +1,4 @@
-.PHONY: install setup test lint check demo clean health serve
+.PHONY: install setup test lint check bench demo clean health serve
 
 install:
 	pip install -e ".[dev]"
@@ -15,6 +15,10 @@ lint:
 check: lint test
 	molecule ingest AGENTS.md
 	molecule eval eval_queries.json
+	molecule eval eval_queries_adversarial.json
+
+bench:
+	python scripts/benchmark_5k.py
 
 demo:
 	python demo.py

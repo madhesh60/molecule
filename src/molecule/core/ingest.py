@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from datetime import datetime
 from pathlib import Path
 
 from molecule.config import MoleculeConfig
@@ -11,6 +10,7 @@ from molecule.core.chunker import chunk_file
 from molecule.core.embed_text import EMBEDDING_TEXT_VERSION, build_embedding_text
 from molecule.core.embedder import embed, get_model
 from molecule.core.labeler import default_llm_fn, generate_labels
+from molecule.db import utc_now_iso
 
 
 def do_ingest(
@@ -23,9 +23,17 @@ def do_ingest(
     if not path.exists():
         return {"error": f"File not found: {path}"}
 
-    sections = chunk_file(path, cfg)
+    try:
+        sections = chunk_file(path, cfg)
+    except UnicodeDecodeError:
+        return {"error": f"Not a UTF-8 text file: {path}"}
+    # Drop empty-bodied sections (empty/whitespace-only files) — an empty
+    # chunk can only pollute search results.
+    sections = [s for s in sections if s.content.strip()]
+    if not sections:
+        return {"error": f"No indexable content in: {path}"}
     labels = generate_labels(sections, conn, default_llm_fn)
-    now = datetime.utcnow().isoformat()
+    now = utc_now_iso()
     new_count = updated = skipped = 0
 
     # Remove stale chunks whose heading (and therefore chunk_id) no longer

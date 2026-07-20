@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from datetime import datetime
 from pathlib import Path
 
 import tiktoken
+
+from molecule.db import utc_now_iso
 
 _SESSION_ID = str(uuid.uuid4())
 _ENC = tiktoken.get_encoding("cl100k_base")
@@ -25,7 +26,7 @@ def baseline_tokens(file_path: Path) -> int:
 def record_usage(conn: sqlite3.Connection, tokens_used: int, tokens_baseline: int) -> None:
     conn.execute(
         "INSERT INTO session_telemetry (session_id, tokens_used, tokens_baseline, ts) VALUES (?,?,?,?)",
-        (_SESSION_ID, tokens_used, tokens_baseline, datetime.utcnow().isoformat()),
+        (_SESSION_ID, tokens_used, tokens_baseline, utc_now_iso()),
     )
     conn.commit()
 

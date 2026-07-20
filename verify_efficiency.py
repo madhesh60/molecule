@@ -10,11 +10,17 @@ Exercises the full pipeline using the project's own AGENTS.md:
   6. Token-savings telemetry
 """
 from __future__ import annotations
-import time
+
+import io
 import shutil
+import sys
+import time
 from pathlib import Path
 
-import sys, io
+import tiktoken
+
+from molecule import Molecule
+
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 DIVIDER = "=" * 60
@@ -49,7 +55,6 @@ if TEST_ROOT.exists():
     shutil.rmtree(TEST_ROOT)
 
 header("Step 0 — Setup")
-from molecule import Molecule
 mol = Molecule(root=TEST_ROOT)
 ok(f"Molecule initialised at {mol.health()['db_path']}")
 
@@ -80,7 +85,6 @@ header("Step 2 — Load Router Index (cheap table of contents)")
 index = mol.index()
 
 # Count total tokens in index summaries vs full file
-import tiktoken
 enc = tiktoken.get_encoding("cl100k_base")
 full_file_tokens = len(enc.encode(AGENTS_MD.read_text(encoding="utf-8")))
 index_tokens = sum(len(enc.encode(c["summary"])) for c in index)
