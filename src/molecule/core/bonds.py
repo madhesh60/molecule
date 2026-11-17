@@ -236,9 +236,11 @@ def neighbors(
 ) -> dict[str, list[tuple[str, float, str]]]:
     """chunk id -> [(bonded chunk id, strength, kind)], strongest first.
     Cached until a bond or chunk changes (and re-aged once a day)."""
+    # The result also depends on two settings and on today's date (decay).
+    salt = (utc_now().strftime("%Y-%m-%d"), config.bond_min_strength, config.bond_half_life_days)
     return versioned(
         conn, "bond_neighbors", lambda: _build_neighbors(conn, config),
-        domains=("bonds", "chunks"), salt=utc_now().strftime("%Y-%m-%d"),
+        domains=("bonds", "chunks"), salt=salt,
     )
 
 

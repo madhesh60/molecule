@@ -76,7 +76,7 @@ class MoleculeConfig:
     # --- Context compiler (mol_context) --------------------------------------
     context_budget: int = 1200            # default token budget
     context_min_score_ratio: float = 0.6  # chunks scoring below ratio × best are left out
-    context_mmr_lambda: float = 0.3       # diversity penalty for near-duplicate chunks
+    context_excerpt: str = "head"         # how an overflowing chunk is cut: head | focus
     context_min_excerpt_tokens: int = 60  # never squeeze a chunk below this
     context_max_memories: int = 3
     index_token_budget: int = 400         # mol_load_index always fits in this
@@ -133,6 +133,8 @@ class MoleculeConfig:
         check(0 < self.conflict_threshold <= 1, "conflict_threshold must be in (0, 1]")
         check(self.context_budget >= 64, "context_budget must be >= 64")
         check(self.index_token_budget >= 32, "index_token_budget must be >= 32")
+        check(self.context_excerpt in {"head", "focus"},
+              "context_excerpt must be 'head' or 'focus'")
         check(self.embedding_backend in {"auto", "onnx", "torch", "hashing"},
               "embedding_backend must be one of auto, onnx, torch, hashing")
         return issues

@@ -1,0 +1,400 @@
+{
+  "version": "0.2.0",
+  "routing": {
+    "agents_main": {
+      "n": 20,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "mrr": 1.0,
+      "misses": [],
+      "v01": {
+        "hit_at_1": 1.0,
+        "hit_at_3": 1.0,
+        "mrr": 1.0
+      }
+    },
+    "agents_adversarial": {
+      "n": 12,
+      "hit_at_1": 0.5,
+      "hit_at_3": 0.917,
+      "mrr": 0.715,
+      "misses": [
+        "which functions can an agent actually call over the wire"
+      ],
+      "v01": {
+        "hit_at_1": 0.5833,
+        "hit_at_3": 1.0,
+        "mrr": 0.7361
+      }
+    },
+    "handbook_direct": {
+      "n": 48,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "mrr": 1.0,
+      "misses": [],
+      "v01": {
+        "hit_at_1": 0.9583,
+        "hit_at_3": 1.0,
+        "mrr": 0.9792
+      }
+    },
+    "handbook_paraphrase": {
+      "n": 48,
+      "hit_at_1": 0.729,
+      "hit_at_3": 0.875,
+      "mrr": 0.81,
+      "misses": [
+        "I just joined, what do I run to get the app going on my laptop",
+        "how quickly should I look at a teammate's change after they ask me",
+        "what share of my new code has to be exercised by automated checks",
+        "how do I ship something switched off and turn it on for a few customers first",
+        "the site is down right now, what are the first things I should do",
+        "how much time are we allowed to spend cleaning up old messy code"
+      ],
+      "v01": {
+        "hit_at_1": 0.4167,
+        "hit_at_3": 0.5417,
+        "mrr": 0.5049
+      }
+    }
+  },
+  "ablation": {
+    "agents_main": {
+      "full hybrid": {
+        "hit_at_3": 1.0,
+        "hit_at_1": 1.0
+      },
+      "− passage vectors": {
+        "hit_at_3": 1.0,
+        "hit_at_1": 1.0
+      },
+      "− keyword signal": {
+        "hit_at_3": 1.0,
+        "hit_at_1": 1.0
+      },
+      "− heading boost": {
+        "hit_at_3": 1.0,
+        "hit_at_1": 1.0
+      },
+      "− query expansion": {
+        "hit_at_3": 1.0,
+        "hit_at_1": 1.0
+      },
+      "dense only": {
+        "hit_at_3": 0.95,
+        "hit_at_1": 0.85
+      },
+      "lexical only": {
+        "hit_at_3": 1.0,
+        "hit_at_1": 0.95
+      }
+    },
+    "agents_adversarial": {
+      "full hybrid": {
+        "hit_at_3": 0.917,
+        "hit_at_1": 0.5
+      },
+      "− passage vectors": {
+        "hit_at_3": 0.917,
+        "hit_at_1": 0.5
+      },
+      "− keyword signal": {
+        "hit_at_3": 0.5,
+        "hit_at_1": 0.167
+      },
+      "− heading boost": {
+        "hit_at_3": 0.75,
+        "hit_at_1": 0.417
+      },
+      "− query expansion": {
+        "hit_at_3": 0.583,
+        "hit_at_1": 0.417
+      },
+      "dense only": {
+        "hit_at_3": 0.583,
+        "hit_at_1": 0.083
+      },
+      "lexical only": {
+        "hit_at_3": 0.75,
+        "hit_at_1": 0.417
+      }
+    },
+    "handbook_direct": {
+      "full hybrid": {
+        "hit_at_3": 1.0,
+        "hit_at_1": 1.0
+      },
+      "− passage vectors": {
+        "hit_at_3": 1.0,
+        "hit_at_1": 1.0
+      },
+      "− keyword signal": {
+        "hit_at_3": 1.0,
+        "hit_at_1": 1.0
+      },
+      "− heading boost": {
+        "hit_at_3": 1.0,
+        "hit_at_1": 1.0
+      },
+      "− query expansion": {
+        "hit_at_3": 1.0,
+        "hit_at_1": 1.0
+      },
+      "dense only": {
+        "hit_at_3": 1.0,
+        "hit_at_1": 0.979
+      },
+      "lexical only": {
+        "hit_at_3": 1.0,
+        "hit_at_1": 1.0
+      }
+    },
+    "handbook_paraphrase": {
+      "full hybrid": {
+        "hit_at_3": 0.875,
+        "hit_at_1": 0.729
+      },
+      "− passage vectors": {
+        "hit_at_3": 0.875,
+        "hit_at_1": 0.729
+      },
+      "− keyword signal": {
+        "hit_at_3": 0.812,
+        "hit_at_1": 0.583
+      },
+      "− heading boost": {
+        "hit_at_3": 0.875,
+        "hit_at_1": 0.75
+      },
+      "− query expansion": {
+        "hit_at_3": 0.875,
+        "hit_at_1": 0.729
+      },
+      "dense only": {
+        "hit_at_3": 0.812,
+        "hit_at_1": 0.583
+      },
+      "lexical only": {
+        "hit_at_3": 0.583,
+        "hit_at_1": 0.417
+      }
+    }
+  },
+  "abstention": {
+    "agents (thresholds were tuned here)": {
+      "in_scope": 32,
+      "in_scope_answered": 30,
+      "off_topic": 12,
+      "off_topic_refused": 12,
+      "off_topic_wrongly_answered": []
+    },
+    "handbook (held out)": {
+      "in_scope": 96,
+      "in_scope_answered": 93,
+      "off_topic": 16,
+      "off_topic_refused": 10,
+      "off_topic_wrongly_answered": [
+        "translate good morning into Japanese",
+        "what is our parental leave policy",
+        "how are stock options vested for new hires",
+        "what GraphQL schema stitching approach do we use",
+        "how do I expense a conference ticket",
+        "what is the office wifi password"
+      ]
+    }
+  },
+  "context": {
+    "n": 48,
+    "budgets": {
+      "100": {
+        "compiler_answer_recall": 0.729,
+        "compiler_mean_tokens": 94,
+        "compiler_over_budget": 0,
+        "compiler_focus_answer_recall": 0.583,
+        "compiler_focus_mean_tokens": 88,
+        "compiler_focus_over_budget": 0,
+        "fill_answer_recall": 0.729,
+        "fill_mean_tokens": 98,
+        "compiler_off_topic_mean_tokens": 92
+      },
+      "150": {
+        "compiler_answer_recall": 0.75,
+        "compiler_mean_tokens": 128,
+        "compiler_over_budget": 0,
+        "compiler_focus_answer_recall": 0.75,
+        "compiler_focus_mean_tokens": 124,
+        "compiler_focus_over_budget": 0,
+        "fill_answer_recall": 0.771,
+        "fill_mean_tokens": 148,
+        "compiler_off_topic_mean_tokens": 114
+      },
+      "200": {
+        "compiler_answer_recall": 0.771,
+        "compiler_mean_tokens": 177,
+        "compiler_over_budget": 0,
+        "compiler_focus_answer_recall": 0.792,
+        "compiler_focus_mean_tokens": 173,
+        "compiler_focus_over_budget": 0,
+        "fill_answer_recall": 0.771,
+        "fill_mean_tokens": 197,
+        "compiler_off_topic_mean_tokens": 137
+      },
+      "300": {
+        "compiler_answer_recall": 0.854,
+        "compiler_mean_tokens": 253,
+        "compiler_over_budget": 0,
+        "compiler_focus_answer_recall": 0.875,
+        "compiler_focus_mean_tokens": 250,
+        "compiler_focus_over_budget": 0,
+        "fill_answer_recall": 0.854,
+        "fill_mean_tokens": 294,
+        "compiler_off_topic_mean_tokens": 161
+      },
+      "600": {
+        "compiler_answer_recall": 0.896,
+        "compiler_mean_tokens": 431,
+        "compiler_over_budget": 0,
+        "compiler_focus_answer_recall": 0.896,
+        "compiler_focus_mean_tokens": 428,
+        "compiler_focus_over_budget": 0,
+        "fill_answer_recall": 0.917,
+        "fill_mean_tokens": 589,
+        "compiler_off_topic_mean_tokens": 206
+      },
+      "1200": {
+        "compiler_answer_recall": 0.958,
+        "compiler_mean_tokens": 627,
+        "compiler_over_budget": 0,
+        "compiler_focus_answer_recall": 0.958,
+        "compiler_focus_mean_tokens": 626,
+        "compiler_focus_over_budget": 0,
+        "fill_answer_recall": 0.979,
+        "fill_mean_tokens": 1178,
+        "compiler_off_topic_mean_tokens": 226
+      }
+    },
+    "full_file_tokens": 5631
+  },
+  "feedback": {
+    "n": {
+      "same_question_again": 24,
+      "reworded_question": 24,
+      "other_topics": 48
+    },
+    "before": {
+      "same_question_again": {
+        "hit_at_1": 0.708,
+        "mrr": 0.8
+      },
+      "reworded_question": {
+        "hit_at_1": 0.625,
+        "mrr": 0.79
+      },
+      "other_topics": {
+        "hit_at_1": 0.875,
+        "mrr": 0.911
+      }
+    },
+    "votes_cast": 81,
+    "query_aware": {
+      "same_question_again": {
+        "hit_at_1": 0.875,
+        "mrr": 0.91
+      },
+      "reworded_question": {
+        "hit_at_1": 0.917,
+        "mrr": 0.944
+      },
+      "other_topics": {
+        "hit_at_1": 0.875,
+        "mrr": 0.911
+      }
+    },
+    "global_weight": {
+      "same_question_again": {
+        "hit_at_1": 0.792,
+        "mrr": 0.862
+      },
+      "reworded_question": {
+        "hit_at_1": 0.833,
+        "mrr": 0.906
+      },
+      "other_topics": {
+        "hit_at_1": 0.833,
+        "mrr": 0.876
+      }
+    }
+  },
+  "bonds": {
+    "n": 8,
+    "budgets": {
+      "400": {
+        "no_bonds": {
+          "complete": 5,
+          "incomplete": [
+            "how do I deploy to production and what do I do if the canary looks bad",
+            "what happens to a failing webhook delivery and how do we avoid processing duplicate events",
+            "the API is down: how severe is it and who does what"
+          ]
+        },
+        "reference_bonds": {
+          "complete": 7,
+          "incomplete": [
+            "the API is down: how severe is it and who does what"
+          ]
+        },
+        "after_cofetch_learning": {
+          "complete": 7,
+          "incomplete": [
+            "the API is down: how severe is it and who does what"
+          ]
+        }
+      },
+      "600": {
+        "no_bonds": {
+          "complete": 5,
+          "incomplete": [
+            "how do I deploy to production and what do I do if the canary looks bad",
+            "what happens to a failing webhook delivery and how do we avoid processing duplicate events",
+            "the API is down: how severe is it and who does what"
+          ]
+        },
+        "reference_bonds": {
+          "complete": 7,
+          "incomplete": [
+            "the API is down: how severe is it and who does what"
+          ]
+        },
+        "after_cofetch_learning": {
+          "complete": 7,
+          "incomplete": [
+            "the API is down: how severe is it and who does what"
+          ]
+        }
+      },
+      "1200": {
+        "no_bonds": {
+          "complete": 5,
+          "incomplete": [
+            "how do I deploy to production and what do I do if the canary looks bad",
+            "what happens to a failing webhook delivery and how do we avoid processing duplicate events",
+            "the API is down: how severe is it and who does what"
+          ]
+        },
+        "reference_bonds": {
+          "complete": 7,
+          "incomplete": [
+            "the API is down: how severe is it and who does what"
+          ]
+        },
+        "after_cofetch_learning": {
+          "complete": 7,
+          "incomplete": [
+            "the API is down: how severe is it and who does what"
+          ]
+        }
+      }
+    }
+  }
+}

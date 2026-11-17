@@ -37,6 +37,11 @@ def test_always_include_detected(sample_md):
     assert [s.heading_path for s in always] == [["Section Two"]]
 
 
+def test_always_include_marker_is_not_part_of_the_content(sample_md):
+    section = next(s for s in chunk_file(sample_md, MoleculeConfig()) if s.always_include)
+    assert section.content == "This must always load."
+
+
 def test_always_include_mentioned_in_inline_code_is_not_a_marker():
     """Documentation *about* the marker must not turn itself into a guardrail."""
     text = "# Docs\n\nMark a section with `<!-- always_include -->` or `always_include: true`.\n"

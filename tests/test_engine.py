@@ -176,7 +176,7 @@ def test_evaluate_with_ablation(ingested):
     result = ingested.evaluate(
         [{"query": "undo a release", "answer": "deployctl rollback"}], k=3, ablate=True
     )
-    assert result["hits"] == 1 and len(result["ablation"]) == 7
+    assert result["hits"] == 1 and len(result["ablation"]) == 6
 
 
 def test_sources_and_removal(ingested):

@@ -69,7 +69,7 @@ def test_search_json_and_no_results(indexed, run):
 def test_context_prints_paste_ready_text(indexed):
     result = indexed("context", "how do I roll back a release", "--budget", "200")
     assert "deployctl rollback" in result.output
-    assert "### handbook.md::Service Handbook:Rollback" in result.output
+    assert "### handbook.md › Rollback" in result.output
 
 
 def test_context_json_respects_budget(indexed):

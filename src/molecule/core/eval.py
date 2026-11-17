@@ -125,7 +125,6 @@ def run_eval(
 # One ranking signal removed (or isolated) at a time.
 ABLATIONS: tuple[tuple[str, dict], ...] = (
     ("full hybrid", {}),
-    ("− passage vectors", {"passage_weight": 0.0}),
     ("− keyword signal", {"keyword_weight": 0.0}),
     ("− heading boost", {"heading_boost": 0.0}),
     ("− query expansion", {"query_expansion": False}),

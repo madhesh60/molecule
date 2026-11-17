@@ -159,8 +159,12 @@ def learned_weights(
     Chunks without votes keep their stored weight (`prior`, normally 1.0)."""
     weights = prior.astype(np.float32).copy()
     try:
+        # What is loaded depends on these settings as well as on the votes.
+        salt = (config.feedback_window, config.learned_weight_min, config.learned_weight_max,
+                embedder_for(config).name)
         votes = versioned(
-            conn, "feedback_votes", lambda: _load_votes(conn, config), domains=("feedback",)
+            conn, "feedback_votes", lambda: _load_votes(conn, config),
+            domains=("feedback",), salt=salt,
         )
     except sqlite3.OperationalError:   # store without the feedback table
         return weights

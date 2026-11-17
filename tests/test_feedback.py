@@ -207,3 +207,18 @@ def test_chunk_without_votes_keeps_its_stored_weight(conn, cfg):
     vector = embed_query("anything", embedder_for(cfg), cfg.chunk_embed_tokens)
     prior = np.asarray([1.3], dtype=np.float32)
     assert learned_weights(conn, cfg, ["f.md::A"], prior, vector)[0] == pytest.approx(1.3)
+
+
+def test_vote_cache_respects_settings(conn, cfg, tmp_path):
+    """The replay window is a setting: changing it must change the result
+    even though no vote was written in between."""
+    from tests.conftest import make_config
+
+    _add_chunk(conn, "f.md::A")
+    for _ in range(6):
+        record_feedback("f.md::A", True, "the question", conn, cfg)
+    full = _weight_for(conn, cfg, "f.md::A", "the question")
+    short = _weight_for(conn, make_config(tmp_path, feedback_window=1), "f.md::A", "the question")
+    assert short == pytest.approx(1.10)
+    assert full > short
+    assert _weight_for(conn, cfg, "f.md::A", "the question") == pytest.approx(full)

@@ -206,3 +206,12 @@ def test_bond_stats(store):
     stats = bond_stats(conn)
     assert stats["bonds"] == {"cofetch": 1, "ref": 3}
     assert stats["strongest_learned"][0]["hits"] == 2
+
+
+def test_neighbor_cache_respects_settings(store, tmp_path):
+    """Two configs on one connection must not share a cached bond graph."""
+    conn, cfg, _ = store
+    strict = make_config(tmp_path, bond_min_strength=0.99)
+    assert neighbors(conn, strict) == {}
+    assert ROLLBACK in {n[0] for n in neighbors(conn, cfg)[DEPLOY]}
+    assert neighbors(conn, strict) == {}

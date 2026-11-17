@@ -115,6 +115,10 @@ def parse_markdown(text: str, split_depth: int = 3) -> list[RawSection]:
             # The marker must be real markup, not a mention inside `inline code`.
             if _ALWAYS_COMMENT_RE.search(_INLINE_CODE_RE.sub("", line)):
                 marked = True
+                # It is an instruction to Molecule, not content for the agent.
+                line = _ALWAYS_COMMENT_RE.sub("", line)
+                if not line.strip():
+                    continue
         buffer.append(line)
     flush()
 

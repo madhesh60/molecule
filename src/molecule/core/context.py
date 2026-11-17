@@ -4,25 +4,30 @@ One call replaces the index → search → fetch round-trips: give it a question
 and a token budget, get back ready-to-paste context that is guaranteed to
 fit, with provenance for every piece.
 
-    rank → gate → select (diverse, bonded) → pack → compress if needed
+    rank → gate → pack in rank order → excerpt the one that overflows
 
   1. **Rank** every chunk with the hybrid scorer (retriever.py).
   2. **Gate.** The budget is a ceiling, not a target: a chunk is only
      eligible if it scores within `context_min_score_ratio` of the best
-     one. If even the best one has low absolute evidence, nothing is
-     included — an honest "the docs do not cover this" costs zero tokens.
-  3. **Select** greedily by marginal value: relevance discounted by
-     similarity to what is already selected (maximal marginal relevance),
-     so two near-duplicate sections do not both eat the budget. A chunk
-     bonded to a selected one (bonds.py) gets a lower bar — "see §7.3"
-     pulls §7.3 in when there is room.
-  4. **Pack** whole chunks while they fit.
-  5. **Compress** the first chunk that does not fit: keep only its passages
-     most relevant to the query (stored passage vectors + term overlap),
-     in document order, with gaps marked. Whatever still does not fit is
-     listed under `omitted` so the agent can fetch it deliberately.
+     one. (Measured: the same answer recall as filling the budget, for
+     roughly half the tokens.) When even the best chunk has low absolute
+     evidence, only that one best guess is included, clearly flagged.
+  3. **Pack** eligible chunks whole, best first. A near-copy of something
+     already packed is skipped — it adds no information. A chunk bonded to
+     a packed one (bonds.py) is eligible at half the usual bar, so "see
+     §7.3" can pull §7.3 in when there is room.
+  4. **Excerpt** the first chunk that does not fit, so the remaining room
+     is not wasted. Two strategies (`context_excerpt`):
+       * "head"  — keep the beginning of the chunk. The default: on the
+         held-out benchmark it kept the answer more often than anything
+         cleverer, because sections lead with their key fact.
+       * "focus" — keep the passages most similar to the query, in document
+         order. Better when answers sit deep inside long sections.
+     Whatever still does not fit is listed under `omitted`, so the agent
+     can fetch it deliberately.
 
-`always_include` guardrail chunks are packed first, unconditionally.
+`always_include` guardrail chunks are packed first, unconditionally, and
+relevant remembered facts are appended at the end.
 """
 from __future__ import annotations
 
@@ -36,6 +41,7 @@ import numpy as np
 from molecule.config import MoleculeConfig
 from molecule.core.bonds import neighbors
 from molecule.core.embedder import Embedder, embedder_for
+from molecule.core.markdown import FenceTracker
 from molecule.core.passages import join_passages, passage_embedding_texts, split_passages
 from molecule.core.retriever import (
     ChunkScores,
@@ -48,12 +54,12 @@ from molecule.core.retriever import (
 from molecule.core.scoring import tokenize
 from molecule.core.tokens import count_tokens, split_by_tokens
 
-_POOL_SIZE = 12
-_MEMORY_BUDGET_SHARE = 0.15
+_POOL_SIZE = 12                 # how far down the ranking the compiler looks
+_MEMORY_BUDGET_SHARE = 0.15     # at most this share of the budget goes to memories
 _SEPARATOR = "\n\n"
 _SEPARATOR_TOKENS = 2
 _MIN_BUDGET = 64
-_PASSAGE_KEEP_RATIO = 0.5   # passages below this share of the best one are dropped
+_ELLIPSIS = " …"
 
 
 @dataclass
@@ -93,9 +99,15 @@ class _Pack:
         self.used += item.tokens + _SEPARATOR_TOKENS
 
 
-def _header(chunk_id: str, excerpt: bool = False, guardrail: bool = False) -> str:
+def _header(chunk_id: str, title: str, excerpt: bool = False, guardrail: bool = False) -> str:
+    """Short, readable provenance line: `### file.md › Section title`.
+
+    The full chunk id is long (it repeats every parent heading) and would eat
+    a real share of a small budget; it is returned in `items`, in the same
+    order, for fetch and feedback calls."""
+    source = chunk_id.partition("::")[0]
     tags = [t for t, on in (("guardrail", guardrail), ("excerpt", excerpt)) if on]
-    return f"### {chunk_id}" + (f" ({', '.join(tags)})" if tags else "")
+    return f"### {source} › {title}" + (f" ({', '.join(tags)})" if tags else "")
 
 
 def _chunk_row(conn: sqlite3.Connection, chunk_id: str) -> sqlite3.Row | None:
@@ -106,17 +118,40 @@ def _chunk_row(conn: sqlite3.Connection, chunk_id: str) -> sqlite3.Row | None:
     ).fetchone()
 
 
+# --- Excerpts ----------------------------------------------------------------------
+
+def head_excerpt(content: str, max_tokens: int) -> tuple[str, int]:
+    """The beginning of a chunk in at most `max_tokens` tokens.
+
+    Cut on a word boundary, and a code fence left open by the cut is closed
+    so the excerpt is still valid markdown."""
+    reserve = count_tokens(_ELLIPSIS) + 3            # the marker and a possible closing fence
+    if max_tokens <= reserve:
+        return "", 0
+    piece = split_by_tokens(content, max_tokens - reserve)[0]
+    cut_mid_word = len(piece) < len(content) and not content[len(piece)].isspace()
+    if cut_mid_word and len(piece.split()) > 1:
+        piece = piece.rsplit(None, 1)[0]             # do not end in half a word
+    piece = piece.rstrip()
+
+    fence = FenceTracker()
+    for line in piece.split("\n"):
+        fence.feed(line)
+    text = piece + ("\n```" if fence.open else "") + _ELLIPSIS
+    return text, count_tokens(text)
+
+
 @lru_cache(maxsize=256)
 def _passage_matrix(
     embedder: Embedder, heading: str, content: str, max_passages: int, max_tokens: int
 ) -> np.ndarray:
     """Vectors for a chunk's passages, embedded on demand and memoised —
-    only chunks that actually need compressing ever pay for this."""
+    only chunks that actually need a focused excerpt ever pay for this."""
     passages = split_passages(content, max_passages)
     return embedder.encode(passage_embedding_texts(heading, passages), max_tokens)
 
 
-def compress_chunk(
+def focus_excerpt(
     content: str,
     heading: str,
     query: str,
@@ -129,9 +164,9 @@ def compress_chunk(
     """Query-focused extract of a chunk in at most `max_tokens` tokens.
 
     Passages are scored by similarity to the query plus the share of query
-    terms they contain; the best ones are kept, in their original order.
-    Passage vectors come from the store when the deep index is enabled,
-    otherwise they are embedded here once and cached."""
+    terms they contain; the best ones are kept, in their original order,
+    with gaps marked. Passage vectors come from the store when the deep
+    index is on, otherwise they are embedded here once and cached."""
     passages = split_passages(content, config.max_passages_per_chunk)
     if not passages:
         return "", 0
@@ -162,13 +197,8 @@ def compress_chunk(
     costs = [count_tokens(p.text) + 2 for p in passages]
     selected: list[int] = []
     used = 0
-    # Room is a ceiling here too: a passage far less relevant than the best
-    # one is left out even when it would fit.
-    floor = _PASSAGE_KEEP_RATIO * float(relevance.max())
     for i in np.argsort(-relevance, kind="stable"):
         i = int(i)
-        if relevance[i] < floor:
-            break
         header_cost = (
             count_tokens(passages[i].header) + 1
             if passages[i].header and not any(passages[j].block == passages[i].block
@@ -179,10 +209,7 @@ def compress_chunk(
             selected.append(i)
             used += costs[i] + header_cost
     if not selected:
-        # Not even the best passage fits: keep its beginning.
-        best = int(np.argmax(relevance))
-        text = split_by_tokens(passages[best].text, max(8, max_tokens - 2))[0].rstrip() + " …"
-        return text, count_tokens(text)
+        return head_excerpt(passages[int(np.argmax(relevance))].text, max_tokens)
 
     text = join_passages(passages, selected)
     return text, count_tokens(text)
@@ -195,7 +222,7 @@ def _render_chunk(
     query: str,
     config: MoleculeConfig,
     room: int,
-    allow_compress: bool,
+    allow_excerpt: bool,
     guardrail: bool = False,
     extra_reason: str = "",
 ) -> _Item | None:
@@ -207,25 +234,28 @@ def _render_chunk(
     reason = _chunk_reason(scores, row, config) + extra_reason
     score = float(scores.final[row])
     kind = "guardrail" if guardrail else "chunk"
+    title = json.loads(stored["heading_path"])[-1]
 
-    whole = f"{_header(chunk_id, guardrail=guardrail)}\n{stored['content']}"
+    whole = f"{_header(chunk_id, title, guardrail=guardrail)}\n{stored['content']}"
     whole_tokens = count_tokens(whole)
     if whole_tokens <= room:
         return _Item(chunk_id, kind, whole, whole_tokens, score, reason)
 
-    header = _header(chunk_id, excerpt=True, guardrail=guardrail)
+    header = _header(chunk_id, title, excerpt=True, guardrail=guardrail)
     body_room = room - count_tokens(header) - 2
     # An excerpt must be worth reading: at least `context_min_excerpt_tokens`,
     # or 40% of a chunk that is itself small.
     full_tokens = int(stored["token_count"])
     smallest_useful = min(config.context_min_excerpt_tokens, max(16, int(0.4 * full_tokens)))
-    if not allow_compress or body_room < smallest_useful:
+    if not allow_excerpt or body_room < smallest_useful:
         return None
-    body, _ = compress_chunk(
-        stored["content"], json.loads(stored["heading_path"])[-1], query,
-        scores.query_vector, body_room, config,
-        stored["passage_embeddings"], stored["passage_count"] or 0,
-    )
+    if config.context_excerpt == "focus":
+        body, _ = focus_excerpt(
+            stored["content"], title, query, scores.query_vector, body_room, config,
+            stored["passage_embeddings"], stored["passage_count"] or 0,
+        )
+    else:
+        body, _ = head_excerpt(stored["content"], body_room)
     if not body:
         return None
     text = f"{header}\n{body}"
@@ -236,35 +266,42 @@ def _render_chunk(
                  compressed=True, full_tokens=full_tokens)
 
 
-def _pick_next(
-    scores: ChunkScores, queue: list[int], selected: list[int],
-    bonus: dict[int, float], lam: float,
-) -> int:
-    """The queued chunk with the highest marginal relevance: its score,
-    discounted by how similar it is to anything already selected."""
-    matrix = scores.corpus.matrix
-    best_row, best_value = queue[0], float("-inf")
-    for row in queue:
-        value = float(scores.final[row]) * (1.0 + bonus.get(row, 0.0))
-        if selected and matrix.size:
-            redundancy = float(np.max(matrix[selected] @ matrix[row]))
-            value *= 1.0 - lam * max(0.0, redundancy)
-        if value > best_value:
-            best_row, best_value = row, value
-    return best_row
-
-
 def _near_duplicate_of(
-    scores: ChunkScores, row: int, selected: list[int], threshold: float
+    scores: ChunkScores, row: int, packed: list[int], threshold: float
 ) -> int | None:
-    """The already-selected chunk that `row` is a near-copy of, if any.
-    A copy adds no information, so it never gets budget."""
+    """The already-packed chunk that `row` is a near-copy of, if any."""
     matrix = scores.corpus.matrix
-    if not selected or not matrix.size:
+    if not packed or not matrix.size:
         return None
-    sims = matrix[selected] @ matrix[row]
+    sims = matrix[packed] @ matrix[row]
     best = int(np.argmax(sims))
-    return selected[best] if float(sims[best]) >= threshold else None
+    return packed[best] if float(sims[best]) >= threshold else None
+
+
+def _memory_items(
+    query: str, conn: sqlite3.Connection, config: MoleculeConfig, budget: int
+) -> list[_Item]:
+    """Remembered facts that bear on the query — cheap, capped, never 'low'."""
+    items: list[_Item] = []
+    room = int(budget * _MEMORY_BUDGET_SHARE)
+    for memory in score_memories(query, conn, config)[: config.context_max_memories]:
+        if memory["relevance"] == "low":
+            continue
+        line = f"- {memory['text']}"
+        tokens = count_tokens(line) + 1
+        if tokens > room:
+            continue
+        room -= tokens
+        items.append(_Item(memory["memory_id"], "memory", line, tokens,
+                           memory["score"], memory["reason"]))
+    return items
+
+
+def _assemble(pack: _Pack, memories: list[_Item]) -> str:
+    blocks = [item.text for item in pack.items]
+    if memories:
+        blocks.append("Remembered facts:\n" + "\n".join(m.text for m in memories))
+    return _SEPARATOR.join(blocks)
 
 
 def build_context(
@@ -275,103 +312,89 @@ def build_context(
     compress: bool = True,
     include_memories: bool = True,
 ) -> dict:
-    """Compile the best context for `query` that fits in `budget` tokens."""
+    """Compile the best context for `query` that fits in `budget` tokens.
+
+    `compress=False` only ever includes whole chunks (no excerpts)."""
     budget = max(_MIN_BUDGET, int(budget or config.context_budget))
     scores = score_chunks(query, conn, config)
     corpus = scores.corpus
     order = [int(r) for r in scores.order()]
     pack = _Pack(budget)
     omitted: list[dict] = []
-    included: set[int] = set()
+    packed: list[int] = []
+
+    def skip(row: int, why: str) -> None:
+        omitted.append({"id": corpus.ids[row], "tokens": int(corpus.token_counts[row]),
+                        "why": why})
+
+    def try_pack(row: int, note: str = "", guardrail: bool = False) -> bool:
+        item = _render_chunk(conn, scores, row, query, config, pack.remaining,
+                             allow_excerpt=compress or guardrail, guardrail=guardrail,
+                             extra_reason=note)
+        if item is None:
+            return False
+        pack.add(item)
+        packed.append(row)
+        return True
 
     # 1. Guardrails: unconditional, first.
     for row in np.flatnonzero(corpus.always_include):
-        row = int(row)
-        item = _render_chunk(conn, scores, row, query, config, pack.remaining,
-                             allow_compress=True, guardrail=True)
-        if item:
-            pack.add(item)
-            included.add(row)
-        else:
-            omitted.append({"id": corpus.ids[row], "tokens": int(corpus.token_counts[row]),
-                            "why": "guardrail does not fit the budget"})
+        if not try_pack(int(row), guardrail=True):
+            skip(int(row), "guardrail does not fit the budget")
 
-    # 2. Gate: is there real evidence that anything answers this query?
+    # 2. Gate: which chunks have earned a place?
     confidence = "low"
     eligible: list[int] = []
+    top_score = 0.0
     if order:
         top = order[0]
+        top_score = float(scores.final[top])
         confidence = relevance_label(
             relevance_evidence(scores.dense[top], scores.keyword[top]), config
         )
-        if confidence != "low":
-            bar = config.context_min_score_ratio * float(scores.final[top])
+        if confidence == "low":
+            eligible = [top]                 # one flagged best guess, nothing more
+        else:
+            bar = config.context_min_score_ratio * top_score
             eligible = [r for r in order[:_POOL_SIZE] if scores.final[r] >= bar]
+    eligible = [r for r in eligible if r not in packed]
 
-    # 3. Remembered facts that bear on the query (cheap, capped).
-    memory_items: list[_Item] = []
-    if include_memories and config.context_max_memories > 0:
-        room = int(budget * _MEMORY_BUDGET_SHARE)
-        for memory in score_memories(query, conn, config)[: config.context_max_memories]:
-            if memory["relevance"] == "low":
-                continue
-            line = f"- {memory['text']}"
-            tokens = count_tokens(line) + 1
-            if tokens > room:
-                continue
-            room -= tokens
-            memory_items.append(_Item(memory["memory_id"], "memory", line, tokens,
-                                      memory["score"], memory["reason"]))
-    memory_reserve = (
-        sum(m.tokens for m in memory_items) + count_tokens("Remembered facts:") + 4
-        if memory_items else 0
+    # Room for remembered facts is set aside before chunks are packed.
+    memories = (
+        _memory_items(query, conn, config, budget)
+        if include_memories and config.context_max_memories > 0 else []
     )
-    pack.used += memory_reserve
+    if memories:
+        pack.used += sum(m.tokens for m in memories) + count_tokens("Remembered facts:") + 4
 
-    # 4–5. Select by marginal relevance; pack whole, compress the one that overflows.
-    bonded = neighbors(conn, config)
-    pool = [r for r in eligible if r not in included]
-    bonus: dict[int, float] = {}
-    bond_note: dict[int, str] = {}
-    queue = list(pool)
-    half_bar = (
-        0.5 * config.context_min_score_ratio * float(scores.final[order[0]]) if order else 0.0
-    )
-    done: set[int] = set()
-    selected: list[int] = []
-    while queue:
-        row = _pick_next(scores, queue, selected, bonus, config.context_mmr_lambda)
-        queue.remove(row)
-        done.add(row)
-        twin = _near_duplicate_of(scores, row, selected, config.dedup_threshold)
+    # 3–4. Pack in rank order; the first chunk that overflows is excerpted.
+    for row in eligible:
+        twin = _near_duplicate_of(scores, row, packed, config.dedup_threshold)
         if twin is not None:
-            omitted.append({"id": corpus.ids[row], "tokens": int(corpus.token_counts[row]),
-                            "why": f"near-duplicate of {corpus.ids[twin]}"})
-            continue
-        item = _render_chunk(conn, scores, row, query, config, pack.remaining,
-                             allow_compress=compress, extra_reason=bond_note.get(row, ""))
-        if item is None:
-            omitted.append({"id": corpus.ids[row], "tokens": int(corpus.token_counts[row]),
-                            "why": "over budget"})
-            continue
-        pack.add(item)
-        included.add(row)
-        selected.append(row)
-        # A selected chunk vouches for the chunks it is bonded to.
-        for other_id, strength, kind in bonded.get(corpus.ids[row], []):
-            other = corpus.row_of.get(other_id)
-            if other is None or other in done or other in included or other in queue:
-                continue
-            if scores.final[other] >= half_bar:
-                queue.append(other)
-                bonus[other] = strength
-                bond_note[other] = f", bonded to {corpus.ids[row]} ({kind})"
+            skip(row, f"near-duplicate of {corpus.ids[twin]}")
+        elif not try_pack(row):
+            skip(row, "over budget")
 
-    # Assemble: guardrails and chunks in selection order, then memories.
-    blocks = [item.text for item in pack.items]
-    if memory_items:
-        blocks.append("Remembered facts:\n" + "\n".join(m.text for m in memory_items))
-    context = _SEPARATOR.join(blocks)
+    # A packed chunk vouches for the chunks it is bonded to: they get in at
+    # half the usual bar, strongest bond first, while room remains.
+    if confidence != "low":
+        bonded = neighbors(conn, config)
+        half_bar = 0.5 * config.context_min_score_ratio * top_score
+        seen = set(packed) | set(eligible)
+        extras: list[tuple[float, int, str]] = []
+        for row in list(packed):
+            for other_id, strength, kind in bonded.get(corpus.ids[row], []):
+                other = corpus.row_of.get(other_id)
+                if other is None or other in seen or scores.final[other] < half_bar:
+                    continue
+                seen.add(other)
+                extras.append((strength, other, f", bonded to {corpus.ids[row]} ({kind})"))
+        for _, row, note in sorted(extras, key=lambda e: -e[0]):
+            if _near_duplicate_of(scores, row, packed, config.dedup_threshold) is None:
+                if not try_pack(row, note):
+                    skip(row, "over budget")
+
+    context = _assemble(pack, memories)
     tokens_used = count_tokens(context)
     # Token counts of joined text can differ slightly from the sum of parts;
     # the budget is a hard promise, so trim from the end until it holds.
@@ -379,13 +402,9 @@ def build_context(
         dropped = pack.items.pop()
         omitted.append({"id": dropped.id, "tokens": dropped.full_tokens or dropped.tokens,
                         "why": "over budget"})
-        blocks = [item.text for item in pack.items]
-        if memory_items:
-            blocks.append("Remembered facts:\n" + "\n".join(m.text for m in memory_items))
-        context = _SEPARATOR.join(blocks)
+        context = _assemble(pack, memories)
         tokens_used = count_tokens(context)
 
-    items = [item.public() for item in pack.items] + [m.public() for m in memory_items]
     chunk_ids = [item.id for item in pack.items]
     result: dict = {
         "query": query,
@@ -393,13 +412,13 @@ def build_context(
         "confidence": confidence,
         "tokens_used": tokens_used,
         "budget": budget,
-        "items": items,
+        "items": [item.public() for item in pack.items] + [m.public() for m in memories],
         "omitted": omitted,
         "sources": sorted({cid.split("::")[0] for cid in chunk_ids}),
     }
     if confidence == "low" and order:
         result["note"] = (
-            "No section clearly covers this query. Closest matches (not included): "
-            + json.dumps([corpus.ids[r] for r in order[:3]], ensure_ascii=False)
+            "Low confidence: no section clearly covers this query. The single closest "
+            "match is included as a best guess; treat it with care."
         )
     return result
