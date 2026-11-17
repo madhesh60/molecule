@@ -9,9 +9,9 @@
   },
   "agents_adversarial": {
     "n": 12,
-    "hit_at_1": 0.5833,
+    "hit_at_1": 0.6667,
     "hit_at_3": 1.0,
-    "mrr_at_10": 0.7361,
+    "mrr_at_10": 0.8056,
     "misses_at_3": [],
     "chunks": 26
   },
@@ -53,5 +53,37 @@
       "how much time are we allowed to spend cleaning up old messy code"
     ],
     "chunks": 59
+  },
+  "blind_direct": {
+    "n": 26,
+    "hit_at_1": 0.9231,
+    "hit_at_3": 1.0,
+    "mrr_at_10": 0.9615,
+    "misses_at_3": [],
+    "chunks": 28
+  },
+  "blind_paraphrase": {
+    "n": 26,
+    "hit_at_1": 0.3077,
+    "hit_at_3": 0.4231,
+    "mrr_at_10": 0.4459,
+    "misses_at_3": [
+      "how much water makes the little seesaw in the rain collector flip over once",
+      "how big is the program allowed to get before it no longer fits on the chip",
+      "I have a fresh unit on my desk, how do I put the software onto it",
+      "what stops a bad new version from bricking the device forever",
+      "can someone push fake software to the stations through the wireless link",
+      "does the unit record more often when the weather turns violent",
+      "if the wireless connection is dead for a month, are the measurements lost",
+      "what does the unit do by itself when the base station stops answering",
+      "what restarts the unit if the software freezes",
+      "how is one measurement packed before it is saved",
+      "can I check my code change without having the real device in front of me",
+      "am I allowed to use malloc or call a function from inside itself",
+      "I'm driving out to one of the poles tomorrow, what should I pack",
+      "one of the units has gone quiet, where do I start looking",
+      "we are taking a unit out of service for good, what must be done to it"
+    ],
+    "chunks": 28
   }
 }

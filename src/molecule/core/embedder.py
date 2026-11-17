@@ -45,7 +45,7 @@ _log = logging.getLogger("molecule")
 DEFAULT_MODEL = "all-MiniLM-L6-v2"
 DEFAULT_ONNX_FILE = "onnx/model.onnx"
 HASHING_DIM = 384
-_BATCH_SIZE = 16   # small batches of similar length beat big padded ones on CPU
+_BATCH_SIZE = 8    # small batches of similar length beat big padded ones on CPU
 _DEFAULT_MAX_TOKENS = 128
 
 # Pooling and prompt conventions for models known to differ from the

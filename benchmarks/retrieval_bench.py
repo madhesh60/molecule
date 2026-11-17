@@ -47,7 +47,7 @@ def _rank_of_gold(mol, query: dict, k: int) -> int | None:
     results = [r for r in mol.search(query["query"], k=k) if r.get("type") == "chunk"]
     ids = [r["id"] for r in results]
     if "answer" in query:
-        bodies = {c["chunk_id"]: _norm(c["content"]) for c in mol.fetch(ids)}
+        bodies = {c["chunk_id"]: _norm(c["content"]) for c in mol.fetch(ids)} if ids else {}
         needle = _norm(query["answer"])
         for rank, cid in enumerate(ids, start=1):
             if needle in bodies.get(cid, ""):
@@ -83,6 +83,11 @@ SETS = {
         BENCH / "corpus" / "handbook.md", BENCH / "queries" / "handbook_direct.json"),
     "handbook_paraphrase": (
         BENCH / "corpus" / "handbook.md", BENCH / "queries" / "handbook_paraphrase.json"),
+    # Written after all tuning was frozen and scored exactly once.
+    "blind_direct": (
+        BENCH / "corpus" / "blind_firmware.md", BENCH / "queries" / "blind_direct.json"),
+    "blind_paraphrase": (
+        BENCH / "corpus" / "blind_firmware.md", BENCH / "queries" / "blind_paraphrase.json"),
 }
 
 

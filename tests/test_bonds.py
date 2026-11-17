@@ -215,3 +215,32 @@ def test_neighbor_cache_respects_settings(store, tmp_path):
     assert neighbors(conn, strict) == {}
     assert ROLLBACK in {n[0] for n in neighbors(conn, cfg)[DEPLOY]}
     assert neighbors(conn, strict) == {}
+
+
+def test_each_co_occurrence_is_counted_once(store):
+    """A, then B, then C inside one window: A-B is reinforced when B arrives,
+    and must not be reinforced *again* when C arrives."""
+    conn, cfg, _ = store
+    strengthen_cofetch(conn, [DEPLOY], cfg)                       # nothing to pair with yet
+    strengthen_cofetch(conn, [ROLLBACK], cfg, partners=[DEPLOY])
+    strengthen_cofetch(conn, [BACKUPS], cfg, partners=[ROLLBACK, DEPLOY])
+    conn.commit()
+    hits = {
+        tuple(sorted((r["src"], r["dst"]))): r["hits"]
+        for r in conn.execute("SELECT src, dst, hits FROM chunk_bonds WHERE kind='cofetch'")
+    }
+    assert hits == {
+        tuple(sorted((DEPLOY, ROLLBACK))): 1,
+        tuple(sorted((ROLLBACK, BACKUPS))): 1,
+        tuple(sorted((DEPLOY, BACKUPS))): 1,
+    }
+
+
+def test_a_big_group_never_drops_the_chunks_just_used(store):
+    """Trimming a large window keeps the new chunks and the most recent partners."""
+    conn, cfg, _ = store
+    partners = [f"book.md::fake-{i}" for i in range(20)] + [DEPLOY]
+    assert strengthen_cofetch(conn, [MIGRATIONS], cfg, partners=partners[::-1]) == 1
+    conn.commit()
+    pair = conn.execute("SELECT src, dst FROM chunk_bonds WHERE kind='cofetch'").fetchone()
+    assert sorted((pair["src"], pair["dst"])) == sorted((DEPLOY, MIGRATIONS))

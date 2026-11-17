@@ -45,6 +45,10 @@ _EPHEMERAL_CUES = re.compile(
     re.IGNORECASE,
 )
 
+# An ephemeral sentence must describe an ongoing activity or state
+# ("we are currently debugging X"), not just mention time ("long day today").
+_STATE_VERB = re.compile(r"\b(am|is|are|was|were|been|being|\w{3,}ing)\b", re.IGNORECASE)
+
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 
 _MIN_SENTENCE_LEN = 15
@@ -55,6 +59,8 @@ def _classify(sentence: str) -> tuple[float, str] | None:
     direct = bool(_DIRECT_CUES.search(sentence) or _FIRST_PERSON_CUES.search(sentence))
     hedged = bool(_HEDGED_CUES.search(sentence))
     ephemeral = bool(_EPHEMERAL_CUES.search(sentence))
+    if ephemeral and not (direct or hedged) and not _STATE_VERB.search(sentence):
+        return None
 
     if not (direct or hedged or ephemeral):
         return None

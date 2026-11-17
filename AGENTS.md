@@ -177,6 +177,28 @@ def mem_extract(transcript: str, source_task: str = "session") -> dict:
     mem_write (redaction/dedup/conflict for free)."""
 ```
 
+**Added in 0.2 (implemented):**
+
+```python
+@mcp.tool()
+def mol_context(query: str, budget: int = 0) -> dict:
+    """One call instead of index → search → fetch: the best context for the
+    query, compiled to fit `budget` tokens, with provenance per item, a
+    confidence label and whatever was omitted for lack of room."""
+
+@mcp.tool()
+def mol_load_index(max_tokens: int = 0, prefix: str = "") -> list[dict]:
+    """Now budget-fit: degrades from summaries to a nested table of contents
+    to per-file totals so it always fits; `prefix` drills into one part."""
+
+@mcp.tool()
+def mol_sync(prune: bool = False) -> dict:
+    """Re-index sources that changed on disk (also done automatically before reads)."""
+```
+
+The full list (18 tools) and their behaviour is in README.md; the design
+reasoning is in docs/ARCHITECTURE.md.
+
 ### 6.5 Token-Savings Telemetry
 - Track, per session: tokens actually sent to the model vs. what would have been sent if the
   full source file(s) were dumped in every time.
@@ -223,10 +245,10 @@ CREATE TABLE session_telemetry (
 ## 8. Tech stack decisions (and why)
 
 - **Python 3.10+** — Standard developer environments, fastest path to build clean and reusable code.
-- **MCP Python SDK / FastMCP** — Official pattern, works across Claude Code, Cursor, and custom agents with no adapter code.
-- **SQLite (+ a vector extension like `sqlite-vec` or pure Python fallback)** — Zero external services, single local file. Molecule works completely offline for data privacy, speed, and network resilience.
-- **Embeddings**: Default to a small local model (e.g. `sentence-transformers` all-MiniLM) for offline execution; allow swapping to cloud embeddings via a config flag for production flexibility.
-- **tiktoken** (or equivalent) for token counting to accurately measure cost and latency reduction.
+- **MCP Python SDK** — Official pattern, works across Claude Code, Cursor, and custom agents with no adapter code. Both SDK generations are supported (1.x `FastMCP`, 2.x `MCPServer`).
+- **SQLite** — Zero external services, single local file. Vectors are float32 blobs in the same file and similarity is brute-force numpy (well under a millisecond per thousand chunks), so no vector extension is needed at this scale. Molecule works completely offline.
+- **Embeddings**: `all-MiniLM-L6-v2` run with **ONNX Runtime** by default — the same vectors as sentence-transformers without the PyTorch install. sentence-transformers remains an optional backend; a dependency-free hashing embedder covers zero-download use and hermetic tests.
+- **tiktoken** for token counting, loaded lazily, with a built-in estimator when its vocabulary cannot be downloaded.
 
 ---
 
@@ -266,6 +288,13 @@ CREATE TABLE session_telemetry (
 - Measure re-chunking speed on a 5,000-line doc — target under 5 seconds for a full rebuild, under 1 second for an incremental (changed-section-only) update.
 - Measure and log real token savings across at least 3 different realistic tasks.
 
+**Status (0.2, measured — see benchmarks/RESULTS.md):** top-3 routing 100% on the
+20-query set, 91.7% on the AGENTS.md paraphrase set, 87.5% on reworded questions
+about a held-out handbook and 88.5% on a blind document written after tuning
+(0.1: 42.3%). A 5,026-line document indexes in 4.1–4.5 s across runs; editing one
+section re-indexes in ~0.1 s. Token savings are measured on a scripted 10-question session
+with every returned token counted.
+
 ---
 
 ## 13. Known risks + mitigations
@@ -292,12 +321,12 @@ CREATE TABLE session_telemetry (
 
 ## 15. Definition of Done for Core MVP
 
-- [ ] Can ingest a real 5,000-line markdown file and produce a sane chunk index in under 5s
-- [ ] Router hits ≥ 80% top-3 precision on the 20-query labeled test set
-- [ ] `mol_stats()` shows a live, accurate, non-cherry-picked savings percentage
-- [ ] Server runs standalone and has been tested against at least 2 different agent clients
-- [ ] Memory persists correctly across a full process restart
-- [ ] README + reference walkthrough (§11) fully validated
+- [x] Can ingest a real 5,000-line markdown file and produce a sane chunk index in under 5s — 4.1–4.5 s for 5,026 lines / 227 chunks
+- [x] Router hits ≥ 80% top-3 precision on the 20-query labeled test set — 20/20, and ≥ 87.5% on three paraphrase sets
+- [x] `mol_stats()` shows a live, accurate, non-cherry-picked savings percentage — counts index, search, fetch, context and memory tokens; each file once per session
+- [x] Server runs standalone and has been tested against at least 2 different agent clients — official MCP client over stdio (mcp 1.x and 2.x) and the Python API
+- [x] Memory persists correctly across a full process restart — checked with two separate processes
+- [x] README + reference walkthrough (§11) fully validated — `python verify_efficiency.py` checks every item above (9/9) and runs `demo.py`
 
 ## 16. Improvements
 
@@ -326,16 +355,23 @@ A scheduled job (run every N ingests, or on startup): find memory clusters with 
 
 **One-line summary:** each of these is just one new column + one small check, not a new system — add them to the tables you already planned in AGENTS.md section 7, one at a time.
 
-**Status update (implemented):** items 1–6 are live. Retrieval is now
-`(0.6·embedding + 0.3·BM25-lite + 0.15·heading-match) × weight × learned_weight`,
-where `learned_weight` comes from `mol_feedback` votes (bounded EMA). Chunks embed
-heading path + summary + content together (versioned via `embedding_text_version`
-— old DBs auto re-embed on next ingest, learned weights preserved). `mem_extract`
-implements the §6.3 extraction pass without requiring an LLM. BM25 and heading
-match additionally expand query tokens into generic concept-cluster siblings
-(`core/expansion.py`, reduced weight, no LLM) — paraphrased queries hit 12/12 on
-the adversarial eval set while the main set stays 20/20. The hot search path is
-memoized per connection (`core/cache.py`), invalidated automatically on writes.
+**Status update (implemented):** items 1–6 are live, item 7 runs as
+`mem_merge_duplicates`. Since 0.2:
+
+- Retrieval is `(0.6·dense + 0.6·coverage-BM25 + 0.15·heading) × learned`, where
+  BM25 is normalised by what the *query* could score (not by the best document),
+  with stemming, stopwords and compound words ("roll back" ↔ "rollback").
+- `learned` is query-aware: each `mol_feedback` vote keeps its question vector and
+  counts in proportion to how similar the current question is.
+- Results carry a calibrated `relevance` label; `low` means "probably not covered".
+- `mol_context` compiles budgeted context in one call; chunks are linked by
+  **bonds** (parsed cross-references + Hebbian co-fetch learning).
+- Memories keep a supersession chain (`superseded_by`) and the notebook is capped.
+- Freshness, migrations, model-tagged vectors, exact cache invalidation, honest
+  telemetry, export/import/backup and `molecule doctor` make it run unattended.
+
+Every number and every rejected idea is in docs/ARCHITECTURE.md and
+benchmarks/RESULTS.md.
 
 
 ## 17. Keeping it Lightweight and Robust

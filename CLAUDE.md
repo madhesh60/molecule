@@ -30,7 +30,8 @@
 
 2. **The Agent** — Claude Code, Cursor, a LangChain agent, a CrewAI agent, or a simple
    CLI script. The agent talks to the developer and needs project context to do its job.
-   Instead of reading the entire `AGENTS.md` every turn, it calls Molecule.
+   Instead of reading the entire `AGENTS.md` every turn, it calls Molecule
+   (usually one `mol_context` call).
 
 3. **Molecule** — the context layer between the agent and the docs. It auto-chunks
    `AGENTS.md` into labeled sections, routes the agent to only the relevant chunk(s) for
@@ -38,6 +39,18 @@
    no cloud.
 
 ---
+
+## The Fast Path (one call)
+
+```
+Agent calls:  mol_context("how does the chunker handle large sections?", budget=600)
+Returns:      ready-to-paste text of only the sections that answer it, never over
+              600 tokens, plus items[] (id, tokens, reason), omitted[] and a
+              confidence label ("low" = the docs probably do not cover this)
+```
+
+This replaces Steps 1–3 below for most agents. The step-by-step tools stay for
+agents that want control.
 
 ## The Actual Flow (Step by Step)
 
@@ -69,12 +82,13 @@ Then the agent calls `mol_ingest("AGENTS.md")` once.
 The agent does NOT read the full file. Instead:
 
 ```
-Agent calls: mol_load_index()
-Returns:     ~100 tokens of chunk IDs + one-line summaries
+Agent calls: mol_load_index()            # default budget: 400 tokens
+Returns:     chunk IDs + one-line summaries, or — when that would not fit — a
+             nested table of contents (headings + token counts) that does
              (the "table of contents", not the "textbook")
 ```
 
-This is near-instant and costs almost nothing.
+Near-instant, and it always fits its budget, however large the docs.
 
 ### Step 2: Developer Asks a Question → Agent Searches
 
@@ -82,7 +96,7 @@ This is near-instant and costs almost nothing.
 Developer:   "How does the chunker handle large sections?"
 Agent calls:  mol_search("how does chunker handle large sections", k=3)
 Returns:      Top 3 candidate chunk IDs + summaries + reason why each matched
-              (hybrid: 0.6·embedding + 0.3·BM25 + 0.15·heading-match × weight × learned_weight)
+              (hybrid: (0.6·dense + 0.6·coverage-BM25 + 0.15·heading) × learned_weight)
 ```
 
 Still cheap — returns summaries only, not full content.
@@ -90,19 +104,20 @@ Still cheap — returns summaries only, not full content.
 ### Step 3: Agent Fetches Only What It Needs
 
 ```
-Agent calls:  mol_fetch(["AGENTS.md::Auto-Chunker"])
-Returns:      Full body text of just that one chunk (~300-400 tokens)
-              Instead of the entire AGENTS.md (~4,300 tokens)
+Agent calls:  mol_fetch(["AGENTS.md::AGENTS.md — Project: Molecule:6. Core modules:6.1 Auto-Chunker"])
+Returns:      Full body text of just that one chunk (~200 tokens) + `related` chunks
+              Instead of the entire AGENTS.md (~4,700 tokens)
 ```
 
-**This is the key savings moment.** Token telemetry records: used 350, would have been 4,300.
+**This is the key savings moment.** Telemetry counts everything returned —
+the index and the search results too — against the whole file, once.
 
 ### Step 4: Agent Does Its Work, Then Teaches the Router
 
 ```
 Agent calls:  mol_feedback("AGENTS.md::Auto-Chunker", useful=True, query="how does chunker...")
-Effect:       learned_weight for that chunk nudges up (bounded EMA, clamped 0.5–1.5)
-              Next time a similar query comes in, this chunk ranks higher
+Effect:       the vote is stored with the question's vector (bounded EMA, 0.5–1.5)
+              Similar questions rank this chunk higher; unrelated ones are unaffected
 ```
 
 ### Step 5: Agent Remembers Facts for Next Session
@@ -121,14 +136,17 @@ Or auto:      mem_extract(transcript_text, source_task="session")
 # New process, new session, same .molecule/store.db
 mol2 = Molecule()
 mol2.recall("deployment preferences")
-→ "Always deploy through Docker Compose" (confidence: 0.9, reason: "keyword+embed match")
+→ "Always deploy through Docker Compose" (confidence: 0.9, reason: "similarity: 0.62, keyword: 0.41")
 ```
 
 ### Step 7: Check the Savings
 
 ```
 Agent calls:  mol_stats()
-Returns:      {"tokens_used_this_session": 350, "tokens_if_full_file_loaded": 4300, "savings_pct": 91.9}
+Returns:      {"tokens_used_this_session": 713, "tokens_if_full_file_loaded": 4747,
+               "savings_pct": 85.0, "by_kind": {"index": …, "search": …, "fetch": …, "context": …},
+               "lifetime": {…}}
+              (measured by verify_efficiency.py: index + search + fetch + one context)
 ```
 
 ---
@@ -136,14 +154,16 @@ Returns:      {"tokens_used_this_session": 350, "tokens_if_full_file_loaded": 43
 ## Key Principle: Read the Table of Contents, Not the Textbook
 
 ```
-WITHOUT Molecule:  Agent reads 4,300 tokens of AGENTS.md every single turn
+WITHOUT Molecule:  Agent reads ~4,700 tokens of AGENTS.md every single turn
                    Most of it is irrelevant to the current task
                    No memory across sessions
 
-WITH Molecule:     Agent reads ~100 tokens (index) + ~350 tokens (one chunk)
-                   90%+ token savings
+WITH Molecule:     Agent makes one mol_context call: ~200–400 tokens of exactly
+                   the sections that answer the question (~90–96% fewer tokens per question,
+                   every returned token counted)
+                   Says "low confidence" instead of guessing when docs don't cover it
                    Remembers decisions, preferences, corrections across sessions
-                   Router gets smarter over time via feedback
+                   Router gets smarter over time via feedback — on the right questions
 ```
 
 ---
@@ -156,34 +176,44 @@ molecule/
 ├── CLAUDE.md                    # This file — working workflow context
 ├── INTEGRATION.md               # Integration examples (LangChain, CrewAI, etc.)
 ├── README.md                    # Public-facing readme
-├── pyproject.toml               # Package config
-├── demo.py                      # Terminal demo showing all 6 steps
-├── eval_queries.json            # 20-query labeled test set for retrieval eval
-├── eval_queries_adversarial.json # Adversarial eval queries
+├── CHANGELOG.md                 # What changed per release
+├── docs/ARCHITECTURE.md         # Design decisions + the experiments behind them
+├── demo.py                      # Two-minute terminal tour
+├── verify_efficiency.py         # Definition of Done (AGENTS.md §15), pass/fail
+├── eval_queries*.json           # Labeled queries for AGENTS.md
+├── benchmarks/                  # corpora, labeled queries, run_benchmarks.py, RESULTS.md
 ├── src/molecule/
-│   ├── __init__.py              # Molecule class — the public Python API
-│   ├── server.py                # MCP server (16 tools via FastMCP)
-│   ├── cli.py                   # CLI: molecule ingest/search/serve/stats/...
-│   ├── config.py                # MoleculeConfig + load_config()
-│   ├── db.py                    # SQLite connection + schema init
-│   ├── core/
-│   │   ├── chunker.py           # Heading-based markdown splitter
-│   │   ├── labeler.py           # One-line summary generator for each chunk
-│   │   ├── embedder.py          # Local embedding (all-MiniLM-L6-v2, ~80MB)
-│   │   ├── ingest.py            # Orchestrates chunk → label → embed → store
-│   │   ├── retriever.py         # Hybrid ranking: embed + BM25 + heading match
-│   │   ├── scoring.py           # Score combination logic
-│   │   ├── expansion.py         # Query expansion helpers
-│   │   ├── memory.py            # mem_write, mem_search, dedup, conflict detection
-│   │   ├── extractor.py         # mem_extract — heuristic fact extraction
-│   │   ├── feedback.py          # Self-learning router (EMA weights)
-│   │   ├── telemetry.py         # Token savings tracking
-│   │   ├── cache.py             # Content-hash based caching
-│   │   └── eval.py              # Retrieval precision evaluation
-│   └── logging_setup.py
-├── tests/                       # pytest test suite
+│   ├── engine.py                # Molecule — the public API (lock, freshness, accounting)
+│   ├── server.py                # MCP server (18 thin tools; mcp 1.x and 2.x)
+│   ├── cli.py                   # CLI: molecule ingest/context/search/doctor/...
+│   ├── config.py                # MoleculeConfig: defaults < config.json < MOLECULE_* env
+│   ├── db.py                    # SQLite connections, migrations, generation triggers
+│   └── core/
+│       ├── markdown.py          # Fence-aware block / sentence / list / table splitting
+│       ├── chunker.py           # Headings → sections → block-aware split → merge
+│       ├── labeler.py           # One-line labels from structure (no LLM)
+│       ├── normalize.py         # Tokenizer: stopwords + light stemmer
+│       ├── expansion.py         # Concept-cluster synonyms
+│       ├── scoring.py           # Coverage-normalised BM25, heading match, compounds
+│       ├── embedder.py          # ONNX / torch / hashing backends, model-tagged vectors
+│       ├── ingest.py            # Atomic incremental ingest, sources, directories
+│       ├── retriever.py         # Hybrid ranking, relevance labels, budget-fit index
+│       ├── context.py           # Budgeted context compiler (mol_context)
+│       ├── bonds.py             # Cross-reference + Hebbian co-fetch links
+│       ├── feedback.py          # Query-aware bounded-EMA learning
+│       ├── memory.py            # Redact → dedup → supersede → expire → evict
+│       ├── extractor.py         # mem_extract — heuristic fact extraction
+│       ├── telemetry.py         # Honest token accounting
+│       ├── sync.py              # Freshness: re-ingest edited files
+│       ├── snapshot.py          # Export / import / backup
+│       ├── doctor.py            # Health checks with fixes
+│       ├── metrics.py           # Latency percentiles per operation
+│       ├── cache.py             # Generation-keyed caches for the hot path
+│       ├── tokens.py            # Offline-safe token counting
+│       └── eval.py              # Precision, Hit@1, MRR, nDCG, ablations
+├── tests/                       # 391 tests (hermetic by default)
 └── .molecule/                   # Local DB store (like .git — invisible until you look)
-    └── store.db                 # SQLite: chunks + memories + telemetry + feedback
+    └── store.db                 # SQLite: chunks, memories, feedback, bonds, telemetry
 ```
 
 ---
@@ -192,76 +222,78 @@ molecule/
 
 | Tool | Purpose | Cost |
 |---|---|---|
-| `mol_ingest(file)` | Chunk + index a markdown file | One-time, ~2-5s |
-| `mol_load_index()` | Get table of contents (IDs + summaries) | ~100 tokens, instant |
-| `mol_search(query, k)` | Find relevant chunks + memories | Summaries only, cheap |
-| `mol_fetch(chunk_ids)` | Get full body text for specific chunks | The "expensive" step — but targeted |
-| `mol_feedback(chunk_id, useful)` | Teach the router what was useful | Free |
-| `mol_feedback_stats()` | See what the router has learned | Free |
+| `mol_context(query, budget)` | **The fast path**: compiled context that fits the budget | One call |
+| `mol_load_index(max_tokens, prefix)` | Table of contents that always fits the budget | ~60–400 tokens |
+| `mol_search(query, k)` | Ranked ids + summaries + reason + relevance + related | Summaries only |
+| `mol_fetch(chunk_ids)` | Full body text for specific chunks | Targeted |
+| `mol_ingest(path)` | Chunk + index a file or a folder | One-time, incremental |
+| `mol_sync(prune)` | Re-index sources edited on disk (also automatic) | Incremental |
+| `mol_feedback(chunk_id, useful, query)` | Teach the router (applies to similar queries) | Free |
+| `mol_feedback_stats()` | Learned weights + strongest learned bonds | Free |
 | `mem_write(text, ...)` | Store a durable fact | Free |
 | `mem_search(query, k)` | Retrieve relevant memories | Cheap |
 | `mem_extract(transcript)` | Auto-extract facts from a conversation | No LLM call |
 | `mol_forget(memory_id)` | Delete a memory | Free |
-| `mol_list_sources()` | List ingested files | Free |
-| `mol_remove_source(file)` | Remove a file from the index | Free |
 | `mem_merge_duplicates()` | Merge near-duplicate memories | Periodic cleanup |
-| `mol_eval(queries, k)` | Run retrieval precision eval | Dev-time only |
-| `mol_health()` | DB status + counts | Free |
-| `mol_stats()` | Live token savings percentage | Free |
+| `mol_list_sources()` / `mol_remove_source(file)` | Manage indexed files | Free |
+| `mol_eval(queries, k)` | Precision / Hit@1 / MRR on labeled queries | Dev-time only |
+| `mol_health()` | Status, counts, stale sources, latency | Free |
+| `mol_stats()` | Token savings — session, lifetime, by kind | Free |
 
 ---
 
 ## Retrieval Ranking Formula
 
 ```
-final_score = (0.6 × embedding_similarity
-             + 0.3 × BM25_keyword_score
+final_score = (0.6 × dense_similarity
+             + 0.6 × coverage_BM25          # share of the query's rare words explained
              + 0.15 × heading_match)
-             × weight
-             × learned_weight
+             × learned_weight               # query-aware, 0.5–1.5
 ```
 
-- `weight`: default 1.0, guardrails (`always_include`) = 2.0+
-- `learned_weight`: starts at 1.0, adjusted by `mol_feedback` votes (bounded EMA, clamped 0.5–1.5)
+- `coverage_BM25`: BM25 divided by what the *query* could score, with stemming,
+  stopwords, compound words and synonym clusters at reduced weight
+- `learned_weight`: each vote counts by similarity of its question to this one
+- `relevance` label from absolute evidence `max(dense,0) + 0.5·keyword`:
+  high ≥ 0.45, low < 0.25
+- Guardrails (`always_include`) are appended to search and packed first in
+  `mol_context`, never ranked up
 - Every result includes a `reason` field explaining why it was picked
 
 ---
 
 ## Memory System
 
-- **Confidence**: 0.9 (direct statement) → 0.6 (hedged) → auto-trust ≥ 0.7 without asking
+- **Confidence**: 0.9 (direct statement) → 0.6 (hedged); below 0.7 gets lower retrieval weight
 - **Types**: `preference` (permanent) vs `task_state` (7-day expiry)
-- **Dedup**: cosine similarity > 0.92 → skip or merge
-- **Conflicts**: new memory contradicts old → old marked `status='replaced'`
+- **Dedup**: cosine similarity ≥ 0.92 → skipped
+- **Conflicts**: new fact contradicts old → old marked `replaced`, `superseded_by` → new;
+  `memory_history()` shows the chain
 - **Redaction**: strips common secret patterns before persisting
-- **Extraction**: `mem_extract` pulls facts heuristically from a transcript — no LLM call
+- **Extraction**: `mem_extract` pulls facts heuristically — no LLM call; a time word alone
+  ("today") is not a fact
+- **Capacity**: past `max_active_memories`, lowest-confidence / never-recalled / oldest go first
 
 ---
 
 ## Development Commands
 
 ```bash
-# Run tests
-pytest
+make check                          # ruff + all tests (incl. real-model accuracy gates)
+python verify_efficiency.py         # Definition of Done, 9 pass/fail checks
+python benchmarks/run_benchmarks.py # regenerates benchmarks/RESULTS.md
+python demo.py                      # two-minute tour
 
-# Lint
-ruff check src/ tests/
-
-# Demo (shows all 6 steps in terminal)
-python demo.py
-
-# Start MCP server
-molecule serve
-
-# Quick CLI usage
-molecule ingest AGENTS.md
+molecule ingest AGENTS.md           # or a folder
+molecule context "how does chunking work" --budget 400
 molecule search "how does chunking work"
-molecule stats
-molecule health
-
-# Run retrieval eval
-molecule eval eval_queries.json
+molecule stats | health | doctor
+molecule eval eval_queries.json --ablate
+molecule serve                      # MCP server (stdio)
 ```
+
+Tests use the built-in `hashing` embedder (no download); tests marked `model`
+use the real model and are skipped when it is not cached.
 
 ---
 
@@ -274,8 +306,9 @@ molecule eval eval_queries.json
 5. Never persist raw secrets or full file contents in memory — summaries and facts only
 6. Default to local embedding model (all-MiniLM-L6-v2) — no cloud dependency
 7. Never re-embed text you've already embedded — check `content_hash` first
-8. Router index load must stay near-instant — never load full chunk bodies
+8. Router index load must stay near-instant and fit its token budget — never load full chunk bodies
 9. If a feature adds a network call or big dependency just for scale we'll never hit, leave it out
+10. A ranking or compiler change ships only with a benchmark run that shows it helps
 
 ---
 

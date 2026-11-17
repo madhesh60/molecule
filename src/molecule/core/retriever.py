@@ -440,16 +440,18 @@ def _chunk_result(scores: ChunkScores, row: int, config: MoleculeConfig) -> dict
     summary = corpus.summaries[row]
     if len(summary) > _SUMMARY_CHARS:
         summary = summary[: _SUMMARY_CHARS - 1].rstrip() + "…"
-    return {
+    result = {
         "id": corpus.ids[row],
         "type": "chunk",
         "summary": summary,
         "score": round(float(scores.final[row]), 4),
         "relevance": relevance_label(evidence, config),
         "tokens": int(corpus.token_counts[row]),
-        "always_include": bool(corpus.always_include[row]),
         "reason": _chunk_reason(scores, row, config),
     }
+    if corpus.always_include[row]:
+        result["always_include"] = True      # only present on guardrails
+    return result
 
 
 def score_memories(
@@ -515,7 +517,6 @@ def rank_candidates(
             "summary": memory["text"],
             "score": memory["score"],
             "relevance": memory["relevance"],
-            "always_include": False,
             "reason": memory["reason"],
         })
     results.sort(key=lambda r: r["score"], reverse=True)

@@ -20,6 +20,7 @@ the breakdown shows where the tokens went.
 from __future__ import annotations
 
 import sqlite3
+import threading
 import uuid
 from pathlib import Path
 
@@ -27,6 +28,11 @@ from molecule.core.tokens import count_tokens, tokenizer_name
 from molecule.db import utc_now_iso
 
 _SESSION_ID = str(uuid.uuid4())
+_lock = threading.Lock()
+# (store path, source) pairs whose full size is already in this session's
+# baseline. Process-wide, so two engines on the same store in one process
+# (a notebook, a test, a demo) can never count the same file twice.
+_counted: set[tuple[str, str]] = set()
 
 KINDS = ("index", "search", "fetch", "context", "memory")
 
@@ -55,6 +61,15 @@ def source_tokens(conn: sqlite3.Connection, source: str) -> int:
         "SELECT SUM(token_count) FROM chunks WHERE chunk_id LIKE ?", (f"{source}::%",)
     ).fetchone()
     return int(row[0] or 0)
+
+
+def claim_baseline(conn: sqlite3.Connection, store: str, sources: set[str]) -> int:
+    """Full-file tokens for the sources delivered for the first time this
+    session (in this store). Each file is counted once per session, ever."""
+    with _lock:
+        fresh = [s for s in sources if (store, s) not in _counted]
+        _counted.update((store, s) for s in fresh)
+    return sum(source_tokens(conn, s) for s in fresh)
 
 
 def record_usage(

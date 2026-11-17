@@ -165,23 +165,37 @@ def rebuild_structural_bonds(
 
 
 def strengthen_cofetch(
-    conn: sqlite3.Connection, chunk_ids: list[str], config: MoleculeConfig
+    conn: sqlite3.Connection,
+    chunk_ids: list[str],
+    config: MoleculeConfig,
+    partners: list[str] | tuple[str, ...] = (),
 ) -> int:
-    """Hebbian update: every pair in `chunk_ids` was used together once more.
-    Returns the number of bonds touched. The caller commits."""
-    ids = sorted(dict.fromkeys(chunk_ids))[:_MAX_COFETCH_GROUP]
-    if len(ids) < 2:
+    """Hebbian update for one co-occurrence event.
+
+    `chunk_ids` were just used together; `partners` were used shortly before
+    (most recent first). Each pair *within* `chunk_ids`, and each of
+    `chunk_ids` with each partner, moves one step toward 1. Pairs among the
+    partners themselves are not touched again — that co-occurrence was
+    already counted when it happened. Returns the number of bonds touched;
+    the caller commits."""
+    new = list(dict.fromkeys(chunk_ids))[:_MAX_COFETCH_GROUP]
+    earlier = [p for p in dict.fromkeys(partners) if p not in new][:_MAX_COFETCH_GROUP]
+    candidates = new + earlier
+    if len(candidates) < 2 or not new:
         return 0
-    marks = ",".join("?" * len(ids))
+    marks = ",".join("?" * len(candidates))
     known = {
         r[0] for r in conn.execute(
-            f"SELECT chunk_id FROM chunks WHERE chunk_id IN ({marks})", ids
+            f"SELECT chunk_id FROM chunks WHERE chunk_id IN ({marks})", candidates
         )
+    }
+    pairs = {tuple(sorted(pair)) for pair in combinations([i for i in new if i in known], 2)}
+    pairs |= {
+        tuple(sorted((a, b))) for a in new for b in earlier if a in known and b in known
     }
     rate = config.bond_learning_rate
     now = utc_now_iso()
-    touched = 0
-    for a, b in combinations([i for i in ids if i in known], 2):
+    for a, b in sorted(pairs):
         conn.execute(
             "INSERT INTO chunk_bonds (src, dst, kind, strength, hits, updated_at) "
             "VALUES (?,?,'cofetch',?,1,?) "
@@ -189,8 +203,7 @@ def strengthen_cofetch(
             "strength = strength + ? * (1.0 - strength), hits = hits + 1, updated_at = ?",
             (a, b, rate, now, rate, now),
         )
-        touched += 1
-    return touched
+    return len(pairs)
 
 
 def _age_days(timestamp: str, now: datetime) -> float:

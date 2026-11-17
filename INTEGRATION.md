@@ -3,25 +3,42 @@
 ## Install
 
 ```bash
-pip install molecule-mcp
+pip install -e ".[dev]"     # from a clone; Python 3.10+
+molecule setup              # one-time: cache the embedding model (~90 MB) for offline use
 ```
 
-That's it. No API keys. No external services. Works offline.
+No API keys, no external services, no PyTorch. After `molecule setup` it works
+with the network unplugged. To skip the model download entirely (weaker on
+reworded questions), set `MOLECULE_EMBEDDING_MODEL=hashing`.
 
 ---
 
-## 3-line integration (any Python agent)
+## The one call most agents need
 
 ```python
 from molecule import Molecule
 
-mol = Molecule()
-mol.ingest("AGENTS.md")  # do this once
+mol = Molecule()               # ./.molecule/store.db, created on first use
+mol.ingest("AGENTS.md")        # once; a folder works too. Edits are picked up automatically.
 
-# Every session:
-chunks = mol.search("how does auth work")
-content = mol.fetch([chunks[0]["id"]])
-print(content[0]["content"])  # only the relevant section
+ctx = mol.context("how does auth work?", budget=600)
+prompt_context = ctx["context"]        # ready to paste — never more than 600 tokens
+if ctx["confidence"] == "low":
+    ...                                # the docs probably do not cover this question
+```
+
+`ctx` also holds `items` (id, tokens, reason for each piece), `omitted` (what
+did not fit, and why) and `sources`.
+
+## Step by step, when you want control
+
+```python
+hits = mol.search("how does auth work", k=3)      # ids + summaries + reason + relevance
+best = [h for h in hits if h["type"] == "chunk" and h["relevance"] != "low"]
+body = mol.fetch([best[0]["id"]])[0]["content"]   # one section, in full
+related = mol.fetch([r["id"] for r in best[0].get("related", [])])  # what it links to
+
+mol.feedback(best[0]["id"], useful=True, query="how does auth work")   # teach the router
 ```
 
 ---
@@ -33,28 +50,27 @@ from langchain.agents import tool
 from molecule import Molecule
 
 mol = Molecule()
-mol.ingest("AGENTS.md")
+mol.ingest("docs/")
 
 @tool
-def search_docs(query: str) -> str:
-    """Search project documentation for relevant context."""
-    results = mol.search(query, k=3)
-    if not results:
-        return "No relevant docs found."
-    chunks = mol.fetch([results[0]["id"]])
-    return chunks[0]["content"]
+def project_docs(question: str) -> str:
+    """Look up how this project does things (rules, architecture, conventions)."""
+    ctx = mol.context(question, budget=800)
+    if ctx["confidence"] == "low":
+        return "The project docs do not seem to cover this."
+    return ctx["context"]
 
 @tool
 def remember_fact(fact: str) -> str:
-    """Store a fact to remember across sessions."""
-    mol.remember(fact)
-    return "Remembered."
+    """Store a decision or preference to remember across sessions."""
+    result = mol.remember(fact, confidence=0.9)
+    return "Remembered." if result.get("stored") else f"Not stored: {result}"
 
 @tool
-def recall_facts(query: str) -> str:
-    """Recall relevant facts from memory."""
-    memories = mol.recall(query, k=3)
-    return "\n".join(m["text"] for m in memories) or "Nothing recalled."
+def recall_facts(question: str) -> str:
+    """Recall decisions and preferences from earlier sessions."""
+    memories = mol.recall(question, k=3)
+    return "\n".join(m["text"] for m in memories if m["relevance"] != "low") or "Nothing recalled."
 ```
 
 ---
@@ -62,25 +78,23 @@ def recall_facts(query: str) -> str:
 ## CrewAI agent
 
 ```python
-from crewai import Agent, Task, Crew
-from crewai_tools import tool
+from crewai import Agent
+from crewai.tools import tool
 from molecule import Molecule
 
 mol = Molecule()
 mol.ingest("AGENTS.md")
 
 @tool("Search project docs")
-def search_docs(query: str) -> str:
-    results = mol.search(query, k=3)
-    if not results:
-        return "No results."
-    return mol.fetch([results[0]["id"]])[0]["content"]
+def search_docs(question: str) -> str:
+    """Answer material from the project docs for one question."""
+    return mol.context(question, budget=800)["context"] or "No relevant docs."
 
 researcher = Agent(
     role="Researcher",
     goal="Answer questions using project documentation",
+    backstory="Knows where everything in the project docs lives.",
     tools=[search_docs],
-    verbose=True,
 )
 ```
 
@@ -88,7 +102,7 @@ researcher = Agent(
 
 ## Claude Code / Cursor (MCP server)
 
-Add to `~/.claude/settings.json`:
+`~/.claude/settings.json` (Claude Code) or `.cursor/mcp.json` (Cursor):
 
 ```json
 {
@@ -102,57 +116,57 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
-Then in Claude Code:
+The server sends usage instructions to the client when it connects. In practice:
+
 ```
-mol_ingest("AGENTS.md")
-mol_search("how does chunking work")
-mol_fetch(["AGENTS.md::Auto-Chunker"])
-mol_stats()
+mol_ingest("AGENTS.md")                       # once
+mol_context("how does chunking work?", 600)   # most questions
+mol_search(...) → mol_fetch(...)              # when you want to pick sections yourself
+mol_feedback(chunk_id, true, "the question")  # after a section helped
+mem_extract("<the conversation>")             # at the end of a task
+mol_stats()                                   # savings so far
+```
+
+Works with the MCP Python SDK 1.x and 2.x.
+
+## Talking to the server from your own code
+
+```python
+import json
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+params = StdioServerParameters(command="molecule", args=["serve"])
+async with stdio_client(params) as (read, write):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        await session.call_tool("mol_ingest", {"file_path": "AGENTS.md"})
+        reply = await session.call_tool("mol_context", {"query": "how is auth done?", "budget": 600})
+        print(json.loads(reply.content[0].text)["context"])
 ```
 
 ---
 
-## Custom agent (raw Python)
+## Custom agent loop
 
 ```python
 from molecule import Molecule
 
 class MyAgent:
-    def __init__(self):
+    def __init__(self) -> None:
         self.mol = Molecule()
-        # Ingest your docs once
-        self.mol.ingest("AGENTS.md")
-        self.mol.ingest("CRAWL.md")
+        self.mol.ingest("docs/")              # incremental: unchanged files are skipped
 
     def run(self, task: str) -> str:
-        # 1. Find relevant context (cheap)
-        candidates = self.mol.search(task, k=3)
-
-        # 2. Fetch only what's needed (targeted)
-        chunk_ids = [c["id"] for c in candidates if c["type"] == "chunk"]
-        context = self.mol.fetch(chunk_ids) if chunk_ids else []
-
-        # 3. Recall relevant memories (cross-session)
-        memories = self.mol.recall(task, k=3)
-
-        # 4. Build prompt with only relevant context
-        prompt = self._build_prompt(task, context, memories)
-
-        # 5. Call your LLM here ...
+        ctx = self.mol.context(task, budget=800)          # docs + relevant memories
+        prompt = f"Task: {task}\n\nProject context:\n{ctx['context']}"
         result = your_llm(prompt)
 
-        # 6. Remember key facts for next session
-        self.mol.remember(f"Task '{task}' completed: {result[:100]}", source_task=task)
-
+        for item in ctx["items"]:                          # say what helped
+            if item["type"] == "chunk":
+                self.mol.feedback(item["id"], useful=True, query=task)
+        self.mol.extract(f"{task}\n{result}", source_task="agent")   # remember decisions
         return result
-
-    def _build_prompt(self, task, context, memories):
-        parts = [f"Task: {task}"]
-        if context:
-            parts.append("Relevant docs:\n" + "\n---\n".join(c["content"] for c in context))
-        if memories:
-            parts.append("From memory:\n" + "\n".join(m["text"] for m in memories))
-        return "\n\n".join(parts)
 ```
 
 ---
@@ -160,62 +174,64 @@ class MyAgent:
 ## Configuration
 
 ```python
+from pathlib import Path
 from molecule import Molecule, MoleculeConfig
 
-# Custom config
-mol = Molecule(config=MoleculeConfig(
-    max_chunk_tokens=300,       # smaller chunks
-    default_k=3,                # fewer results
-    embedding_model="all-MiniLM-L6-v2",  # default, CPU-only
+mol = Molecule(root="/path/to/repo")          # store at /path/to/repo/.molecule/store.db
+
+mol = Molecule(config=MoleculeConfig(         # explicit config (validated)
+    db_path=Path("/path/to/repo/.molecule/store.db"),
+    context_budget=800,
+    max_chunk_tokens=300,
 ))
-
-# Or point at a specific repo root
-mol = Molecule(root="/path/to/repo")
-
-# Or via env vars (useful for Docker/CI)
-# MOLECULE_ROOT=/path/to/repo
-# MOLECULE_MAX_CHUNK_TOKENS=300
-# MOLECULE_DEFAULT_K=3
-# MOLECULE_EMBEDDING_MODEL=all-MiniLM-L6-v2
 ```
+
+Or `.molecule/config.json` in the repo, or environment variables — **every**
+setting is available as `MOLECULE_<NAME>`:
+
+```bash
+MOLECULE_ROOT=/path/to/repo
+MOLECULE_CONTEXT_BUDGET=800
+MOLECULE_EMBEDDING_MODEL=hashing        # zero-download mode
+MOLECULE_AUTO_SYNC=false
+```
+
+Precedence: defaults < `config.json` < environment. Bad values are reported on
+stderr and ignored.
 
 ---
 
 ## Full API reference
 
 ```python
-mol = Molecule(root=None, config=None)
+mol = Molecule(root=None, config=None)          # also a context manager: with Molecule() as mol:
 
 # Context
-mol.ingest("file.md", force=False)   # chunk + index a file
-mol.index()                           # cheap table of contents
-mol.search("query", k=5)             # find relevant chunks + memories
-mol.fetch(["chunk_id"])              # get full content
-mol.sources()                         # list ingested files
-mol.remove_source("file.md")         # remove a file from index
+mol.ingest(path, force=False)                   # file or folder
+mol.sync(prune=False)                           # re-index edited files (also automatic)
+mol.context(query, budget=None, compress=True, include_memories=True)
+mol.index(max_tokens=None, prefix=None)         # table of contents that fits
+mol.search(query, k=None)                       # ids + summaries + reason + relevance + related
+mol.fetch(chunk_ids)                            # full content (+ related)
+mol.bonds(chunk_id)                             # linked chunks
+mol.sources(); mol.remove_source(name)
 
 # Memory
-mol.remember("fact", source_task="task", confidence=0.8, mem_type="preference")
-mol.recall("query", k=5)             # retrieve relevant memories
-mol.forget("memory_id")              # delete a memory
-mol.extract(transcript, source_task="session")  # auto-extract up to 5 facts, no LLM call
+mol.remember(text, source_task="agent", confidence=0.8, mem_type="preference")
+mol.recall(query, k=None)
+mol.forget(memory_id)
+mol.extract(transcript, source_task="session")  # up to 5 facts, no LLM call
+mol.memory_history(memory_id)                   # supersession chain
+mol.merge_duplicates()
 
-# Self-learning router
-mol.feedback("chunk_id", useful=True, query="the query")  # teach the router
-mol.feedback_stats()                 # what the router has learned
+# Learning
+mol.feedback(chunk_id, useful, query="")        # applies to similar questions
+mol.feedback_stats()
 
-# Telemetry
-mol.stats()    # {"tokens_used": 300, "tokens_baseline": 5000, "savings_pct": 94.0}
-mol.health()   # {"status": "ok", "chunks_indexed": 42, "active_memories": 7}
-```
-
----
-
-## Publish to PyPI (make it installable)
-
-```bash
-pip install build twine
-python -m build
-twine upload dist/*
-# then anyone can: pip install molecule-mcp
+# Operations
+mol.stats()                                     # session + lifetime savings, by kind
+mol.health(); mol.metrics(); mol.doctor()
+mol.evaluate(queries, k=3, ablate=False)
+mol.export_snapshot(path); mol.import_snapshot(path); mol.backup(path)
+mol.close()
 ```

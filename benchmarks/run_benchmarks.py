@@ -9,7 +9,8 @@ configuration (real embedding model), so the numbers are what a new user
 gets. Nothing here is mocked.
 
 Experiments
-  routing     Hit@1 / Hit@3 / MRR on every labeled query set, + v0.1 baseline
+  routing     Hit@1 / Hit@3 / MRR on the development query sets, + v0.1 baseline
+  blind       the same on a document nothing was tuned on (scored once)
   ablation    the same sets with one ranking signal removed at a time
   abstention  does "relevance: low" separate off-topic from on-topic questions?
   context     answer recall vs token budget: compiler vs naive truncation
@@ -22,10 +23,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import re
 import shutil
 import statistics
+import subprocess
 import sys
 import tempfile
 import time
@@ -40,6 +43,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from molecule import Molecule, MoleculeConfig, __version__  # noqa: E402
 from molecule.core.context import build_context  # noqa: E402
+from molecule.core.embedder import _embed_query_cached  # noqa: E402
 from molecule.core.eval import run_ablation  # noqa: E402
 from molecule.core.retriever import score_chunks  # noqa: E402
 from molecule.core.tokens import count_tokens, split_by_tokens  # noqa: E402
@@ -60,11 +64,19 @@ def load(name: str) -> list[dict]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+BLIND = BENCH / "corpus" / "blind_firmware.md"
+
+# Development sets: everything was tuned while looking at these.
 QUERY_SETS: dict[str, tuple[Path, str]] = {
     "agents_main": (AGENTS, "eval_queries"),
     "agents_adversarial": (AGENTS, "eval_queries_adversarial"),
     "handbook_direct": (HANDBOOK, "handbook_direct"),
     "handbook_paraphrase": (HANDBOOK, "handbook_paraphrase"),
+}
+# Blind sets: a different domain, written after tuning was frozen, scored once.
+BLIND_SETS: dict[str, tuple[Path, str]] = {
+    "blind_direct": (BLIND, "blind_direct"),
+    "blind_paraphrase": (BLIND, "blind_paraphrase"),
 }
 
 
@@ -91,9 +103,9 @@ def pct(value: float) -> float:
 
 # --- routing --------------------------------------------------------------------------
 
-def bench_routing() -> dict:
+def _routing(sets: dict[str, tuple[Path, str]]) -> dict:
     out: dict = {}
-    for name, (doc, query_file) in QUERY_SETS.items():
+    for name, (doc, query_file) in sets.items():
         with store(doc) as mol:
             result = mol.evaluate(load(query_file), k=3)
         out[name] = {
@@ -112,6 +124,28 @@ def bench_routing() -> dict:
                     "hit_at_1": row["hit_at_1"], "hit_at_3": row["hit_at_3"],
                     "mrr": row["mrr_at_10"],
                 }
+    return out
+
+
+def bench_routing() -> dict:
+    return _routing(QUERY_SETS)
+
+
+def bench_blind() -> dict:
+    """The honest generalisation check: routing and abstention on a document
+    and questions that played no part in any tuning decision."""
+    out: dict = {"routing": _routing(BLIND_SETS)}
+    in_scope = load("blind_direct") + load("blind_paraphrase")
+    off_topic = load("blind_oos")
+    with store(BLIND) as mol:
+        kept = sum(_answered(mol, q["query"]) for q in in_scope)
+        wrongly_answered = [q["query"] for q in off_topic if _answered(mol, q["query"])]
+    out["abstention"] = {
+        "in_scope": len(in_scope), "in_scope_answered": kept,
+        "off_topic": len(off_topic),
+        "off_topic_refused": len(off_topic) - len(wrongly_answered),
+        "off_topic_wrongly_answered": wrongly_answered,
+    }
     return out
 
 
@@ -326,6 +360,9 @@ def bench_bonds() -> dict:
                         if norm(answer) in norm(r["content"])]
                 for _ in range(3):
                     mol.fetch(pair)
+                # Separate tasks happen minutes apart; without this, fetches for
+                # eight unrelated questions would all land in one co-fetch window.
+                mol._recent_fetches.clear()
             row["after_cofetch_learning"] = incomplete(
                 [mol.context(q["query"], budget)["context"] for q in queries]
             )
@@ -389,7 +426,10 @@ def bench_savings() -> dict:
                 "tokens": used, "answered": answered}
 
     for row in out["workflows"].values():
+        row["tokens_per_question"] = round(row["tokens"] / len(queries))
         row["vs_full_file_pct"] = pct(1 - row["tokens"] / full_file)
+        # How many questions cost as much as loading the whole file once?
+        row["questions_per_full_load"] = round(full_file / max(1, row["tokens_per_question"]), 1)
     return out
 
 
@@ -438,18 +478,33 @@ def bench_speed() -> dict:
                        for q in load(name)]
             mol.search("warm up the caches")
             search, context = [], []
-            for q in queries:                   # every query is new: embedding included
+            # Earlier experiments in this process embedded these same questions;
+            # forget them so every timing below includes embedding the query.
+            _embed_query_cached.cache_clear()
+            for q in queries:
                 start = time.perf_counter()
                 mol.search(q, k=5)
                 search.append(time.perf_counter() - start)
-            for q in queries:                   # query vectors now cached
+            _embed_query_cached.cache_clear()
+            for q in queries:
                 start = time.perf_counter()
-                mol.context(q + " please", budget=600)
+                mol.context(q, budget=600)
                 context.append(time.perf_counter() - start)
             chunks = mol.health()["chunks_indexed"]
             out["search"] = {"chunks": chunks, "queries": len(queries), **_percentiles(search)}
             out["context"] = {"chunks": chunks, "queries": len(queries), **_percentiles(context)}
+            mol._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")   # fold the WAL into the file
             out["store_bytes"] = cfg.db_path.stat().st_size
+
+        # Cold start: a fresh process answering one search (model load included).
+        env = {**os.environ, "MOLECULE_ROOT": str(tmp), "PYTHONPATH": str(ROOT / "src")}
+        command = [sys.executable, "-m", "molecule", "search", "how does routing work", "-k", "1"]
+        timings = []
+        for _ in range(3):
+            start = time.perf_counter()
+            subprocess.run(command, env=env, cwd=tmp, capture_output=True, check=True)
+            timings.append(time.perf_counter() - start)
+        out["cold_start_cli_search_s"] = round(min(timings), 2)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return out
@@ -457,6 +512,7 @@ def bench_speed() -> dict:
 
 EXPERIMENTS = {
     "routing": bench_routing,
+    "blind": bench_blind,
     "ablation": bench_ablation,
     "abstention": bench_abstention,
     "context": bench_context,

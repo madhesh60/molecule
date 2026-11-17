@@ -15,16 +15,16 @@
     },
     "agents_adversarial": {
       "n": 12,
-      "hit_at_1": 0.5,
+      "hit_at_1": 0.583,
       "hit_at_3": 0.917,
-      "mrr": 0.715,
+      "mrr": 0.743,
       "misses": [
         "which functions can an agent actually call over the wire"
       ],
       "v01": {
-        "hit_at_1": 0.5833,
+        "hit_at_1": 0.6667,
         "hit_at_3": 1.0,
-        "mrr": 0.7361
+        "mrr": 0.8056
       }
     },
     "handbook_direct": {
@@ -65,17 +65,13 @@
         "hit_at_3": 1.0,
         "hit_at_1": 1.0
       },
-      "− passage vectors": {
-        "hit_at_3": 1.0,
-        "hit_at_1": 1.0
-      },
       "− keyword signal": {
         "hit_at_3": 1.0,
         "hit_at_1": 1.0
       },
       "− heading boost": {
         "hit_at_3": 1.0,
-        "hit_at_1": 1.0
+        "hit_at_1": 0.95
       },
       "− query expansion": {
         "hit_at_3": 1.0,
@@ -83,7 +79,7 @@
       },
       "dense only": {
         "hit_at_3": 0.95,
-        "hit_at_1": 0.85
+        "hit_at_1": 0.8
       },
       "lexical only": {
         "hit_at_3": 1.0,
@@ -93,11 +89,7 @@
     "agents_adversarial": {
       "full hybrid": {
         "hit_at_3": 0.917,
-        "hit_at_1": 0.5
-      },
-      "− passage vectors": {
-        "hit_at_3": 0.917,
-        "hit_at_1": 0.5
+        "hit_at_1": 0.583
       },
       "− keyword signal": {
         "hit_at_3": 0.5,
@@ -105,27 +97,23 @@
       },
       "− heading boost": {
         "hit_at_3": 0.75,
-        "hit_at_1": 0.417
+        "hit_at_1": 0.333
       },
       "− query expansion": {
         "hit_at_3": 0.583,
-        "hit_at_1": 0.417
+        "hit_at_1": 0.333
       },
       "dense only": {
-        "hit_at_3": 0.583,
+        "hit_at_3": 0.5,
         "hit_at_1": 0.083
       },
       "lexical only": {
         "hit_at_3": 0.75,
-        "hit_at_1": 0.417
+        "hit_at_1": 0.5
       }
     },
     "handbook_direct": {
       "full hybrid": {
-        "hit_at_3": 1.0,
-        "hit_at_1": 1.0
-      },
-      "− passage vectors": {
         "hit_at_3": 1.0,
         "hit_at_1": 1.0
       },
@@ -155,10 +143,6 @@
         "hit_at_3": 0.875,
         "hit_at_1": 0.729
       },
-      "− passage vectors": {
-        "hit_at_3": 0.875,
-        "hit_at_1": 0.729
-      },
       "− keyword signal": {
         "hit_at_3": 0.812,
         "hit_at_1": 0.583
@@ -184,7 +168,7 @@
   "abstention": {
     "agents (thresholds were tuned here)": {
       "in_scope": 32,
-      "in_scope_answered": 30,
+      "in_scope_answered": 31,
       "off_topic": 12,
       "off_topic_refused": 12,
       "off_topic_wrongly_answered": []
@@ -389,12 +373,116 @@
           ]
         },
         "after_cofetch_learning": {
-          "complete": 7,
-          "incomplete": [
-            "the API is down: how severe is it and who does what"
-          ]
+          "complete": 8,
+          "incomplete": []
         }
       }
+    }
+  },
+  "savings": {
+    "questions": 10,
+    "workflows": {
+      "index + search + fetch top-1 (full index)": {
+        "tokens": 11243,
+        "answered": 9,
+        "tokens_per_question": 1124,
+        "vs_full_file_pct": -99.7,
+        "questions_per_full_load": 5.0
+      },
+      "budget-fit index + search + fetch top-1": {
+        "tokens": 5552,
+        "answered": 9,
+        "tokens_per_question": 555,
+        "vs_full_file_pct": 1.4,
+        "questions_per_full_load": 10.1
+      },
+      "mol_context(budget=300)": {
+        "tokens": 2272,
+        "answered": 10,
+        "tokens_per_question": 227,
+        "vs_full_file_pct": 59.7,
+        "questions_per_full_load": 24.8
+      },
+      "mol_context(budget=600)": {
+        "tokens": 3627,
+        "answered": 10,
+        "tokens_per_question": 363,
+        "vs_full_file_pct": 35.6,
+        "questions_per_full_load": 15.5
+      }
+    },
+    "full_file_tokens": 5631
+  },
+  "speed": {
+    "ingest_5k_lines": {
+      "lines": 5026,
+      "chunks": 227,
+      "wall_s": 4.2,
+      "embed_s": 4.129
+    },
+    "incremental_reingest": {
+      "wall_s": 0.14,
+      "re_embedded": 2,
+      "skipped": 225
+    },
+    "unchanged_reingest_s": 0.0007,
+    "search": {
+      "chunks": 282,
+      "queries": 128,
+      "p50_ms": 2.95,
+      "p95_ms": 3.7
+    },
+    "context": {
+      "chunks": 282,
+      "queries": 128,
+      "p50_ms": 3.1,
+      "p95_ms": 4.57
+    },
+    "store_bytes": 1339392,
+    "cold_start_cli_search_s": 0.69
+  },
+  "blind": {
+    "routing": {
+      "blind_direct": {
+        "n": 26,
+        "hit_at_1": 1.0,
+        "hit_at_3": 1.0,
+        "mrr": 1.0,
+        "misses": [],
+        "v01": {
+          "hit_at_1": 0.9231,
+          "hit_at_3": 1.0,
+          "mrr": 0.9615
+        }
+      },
+      "blind_paraphrase": {
+        "n": 26,
+        "hit_at_1": 0.423,
+        "hit_at_3": 0.885,
+        "mrr": 0.634,
+        "misses": [
+          "how much water makes the little seesaw in the rain collector flip over once",
+          "if the wireless connection is dead for a month, are the measurements lost",
+          "what does the unit do by itself when the base station stops answering"
+        ],
+        "v01": {
+          "hit_at_1": 0.3077,
+          "hit_at_3": 0.4231,
+          "mrr": 0.4459
+        }
+      }
+    },
+    "abstention": {
+      "in_scope": 52,
+      "in_scope_answered": 49,
+      "off_topic": 10,
+      "off_topic_refused": 6,
+      "off_topic_wrongly_answered": [
+        "what is the price of the station hardware",
+        "which cellular modem does the station use",
+        "how do I train a machine learning model for weather forecasting",
+        "what is the warranty period for the solar panel"
+      ]
     }
   }
 }

@@ -1,4 +1,4 @@
-.PHONY: install setup test lint check bench demo clean health serve
+.PHONY: install setup test lint check verify bench demo clean health serve
 
 install:
 	pip install -e ".[dev]"
@@ -7,27 +7,28 @@ setup:
 	molecule setup
 
 test:
-	pytest -v
+	pytest -q
 
 lint:
-	ruff check src tests
+	ruff check .
 
 check: lint test
-	molecule ingest AGENTS.md
-	molecule eval eval_queries.json
-	molecule eval eval_queries_adversarial.json
+
+verify:
+	python verify_efficiency.py
 
 bench:
-	python scripts/benchmark_5k.py
+	python benchmarks/run_benchmarks.py
 
 demo:
 	python demo.py
 
 clean:
-	rm -rf .molecule/ __pycache__ src/**/__pycache__ .pytest_cache dist *.egg-info
+	rm -rf .molecule/ .molecule_demo_tmp/ .pytest_cache .ruff_cache dist build *.egg-info
+	find . -name __pycache__ -type d -prune -exec rm -rf {} +
 
 health:
-	molecule health
+	molecule doctor
 
 serve:
 	molecule serve

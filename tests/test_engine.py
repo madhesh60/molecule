@@ -67,6 +67,18 @@ def test_baseline_counts_each_file_once_and_only_when_delivered(ingested):
     assert stats()["tokens_if_full_file_loaded"] == full_file   # never double-counted
 
 
+def test_two_engines_on_one_store_never_double_count_the_baseline(cfg, sample_doc):
+    with Molecule(config=cfg) as first:
+        first.ingest(sample_doc)
+        chunk = first.search("rollback", k=1)[0]["id"]
+        first.fetch([chunk])
+        once = first.stats()["tokens_if_full_file_loaded"]
+    with Molecule(config=cfg) as second:          # same process, same session
+        second.fetch([chunk])
+        second.context("how do deploys work")
+        assert second.stats()["tokens_if_full_file_loaded"] == once
+
+
 def test_savings_include_the_overhead(ingested):
     results = ingested.search("rollback", k=1)
     chunk = ingested.fetch([results[0]["id"]])[0]

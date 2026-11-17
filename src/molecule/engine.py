@@ -100,7 +100,6 @@ class Molecule:
         enforce_capacity(self._conn, self._config)
         self._lock = threading.RLock()
         self._metrics = Metrics()
-        self._touched_sources: set[str] = set()     # files already counted in the baseline
         self._recent_fetches: deque[tuple[float, str]] = deque(maxlen=64)
         self._recent_useful: deque[tuple[float, str]] = deque(maxlen=64)
         self._last_sync_check = 0.0
@@ -148,11 +147,7 @@ class Molecule:
 
     def _baseline_for(self, sources: set[str]) -> int:
         """Full-file tokens for sources delivered for the first time this session."""
-        baseline = 0
-        for source in sources - self._touched_sources:
-            baseline += telemetry.source_tokens(self._conn, source)
-            self._touched_sources.add(source)
-        return baseline
+        return telemetry.claim_baseline(self._conn, str(self._config.db_path), sources)
 
     def _account(self, kind: str, payload: Any) -> None:
         """Record the tokens of a response that carries no chunk bodies."""
@@ -160,13 +155,14 @@ class Molecule:
             tokens = count_tokens(json.dumps(payload, ensure_ascii=False))
             telemetry.record_usage(self._conn, tokens, 0, kind)
 
-    def _together(self, recent: deque[tuple[float, str]], ids: list[str]) -> list[str]:
-        """`ids` plus whatever else landed in the same short window."""
+    def _recent_partners(self, recent: deque[tuple[float, str]], ids: list[str]) -> list[str]:
+        """Chunks used within the co-fetch window before `ids` (most recent
+        first); then remember `ids` as used now."""
         now = time.monotonic()
         window = self._config.cofetch_window_s
-        group = [cid for ts, cid in recent if now - ts <= window] + list(ids)
+        partners = [cid for ts, cid in reversed(recent) if now - ts <= window]
         recent.extend((now, cid) for cid in ids)
-        return list(dict.fromkeys(group))
+        return list(dict.fromkeys(partners))
 
     @staticmethod
     def _clean_query(query: str) -> str:
@@ -229,9 +225,8 @@ class Molecule:
         baseline = self._baseline_for({cid.split("::")[0] for cid in fetched})
         telemetry.record_usage(self._conn, used, baseline, "fetch")
         # Chunks an agent chooses to read together are probably needed together.
-        if bonds_mod.strengthen_cofetch(
-            self._conn, self._together(self._recent_fetches, fetched), self._config
-        ):
+        partners = self._recent_partners(self._recent_fetches, fetched)
+        if bonds_mod.strengthen_cofetch(self._conn, fetched, self._config, partners):
             self._conn.commit()
         return chunks
 
@@ -322,9 +317,8 @@ class Molecule:
                                  self._config)
         if useful and "error" not in result:
             # Two chunks that both helped in the same short window belong together.
-            if bonds_mod.strengthen_cofetch(
-                self._conn, self._together(self._recent_useful, [chunk_id]), self._config
-            ):
+            partners = self._recent_partners(self._recent_useful, [chunk_id])
+            if bonds_mod.strengthen_cofetch(self._conn, [chunk_id], self._config, partners):
                 self._conn.commit()
         return result
 

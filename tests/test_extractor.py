@@ -100,3 +100,11 @@ def test_empty_transcript(conn, config):
     result = extract_memories("", "t", conn, config)
     assert result["extracted"] == 0
     assert result["stored"] == 0
+
+
+def test_time_word_alone_is_not_a_fact():
+    """'today' makes a sentence ephemeral, but only an ongoing state is worth keeping."""
+    assert _classify("Long session today.") is None
+    assert _classify("It rained today in the city center.") is None
+    assert _classify("We are migrating the billing tables today.")[1] == "task_state"
+    assert _classify("Currently debugging the payment webhook handler.")[1] == "task_state"
