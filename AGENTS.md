@@ -291,7 +291,8 @@ CREATE TABLE session_telemetry (
 **Status (0.2, measured — see benchmarks/RESULTS.md):** top-3 routing 100% on the
 20-query set, 91.7% on the AGENTS.md paraphrase set, 87.5% on reworded questions
 about a held-out handbook and 88.5% on a blind document written after tuning
-(0.1: 42.3%). A 5,026-line document indexes in 4.1–4.5 s across runs; editing one
+(0.1: 42.3%). A 5,026-line document indexes in 4.1–4.5 s on the first test machine and 5.3–5.5 s on a
+later one (still to fix, see §15); editing one
 section re-indexes in ~0.1 s. Token savings are measured on a scripted 10-question session
 with every returned token counted.
 
@@ -321,12 +322,12 @@ with every returned token counted.
 
 ## 15. Definition of Done for Core MVP
 
-- [x] Can ingest a real 5,000-line markdown file and produce a sane chunk index in under 5s — 4.1–4.5 s for 5,026 lines / 227 chunks
+- [ ] Can ingest a real 5,000-line markdown file and produce a sane chunk index in under 5s — 4.1–4.5 s on the first machine, but 5.3–5.5 s on a later run, so this is not yet reliably met
 - [x] Router hits ≥ 80% top-3 precision on the 20-query labeled test set — 20/20, and ≥ 87.5% on three paraphrase sets
 - [x] `mol_stats()` shows a live, accurate, non-cherry-picked savings percentage — counts index, search, fetch, context and memory tokens; each file once per session
-- [x] Server runs standalone and has been tested against at least 2 different agent clients — official MCP client over stdio (mcp 1.x and 2.x) and the Python API
+- [ ] Server runs standalone and has been tested against at least 2 different agent clients — partly: tested with the official MCP client over stdio (mcp 1.x and 2.x) and the Python API; NOT yet run inside Claude Code or Cursor
 - [x] Memory persists correctly across a full process restart — checked with two separate processes
-- [x] README + reference walkthrough (§11) fully validated — `python verify_efficiency.py` checks every item above (9/9) and runs `demo.py`
+- [x] README + reference walkthrough (§11) fully validated — `python verify_efficiency.py` checks every item above and runs `demo.py`; the last run passed 8 of 9 (the ingest timing above)
 
 ## 16. Improvements
 

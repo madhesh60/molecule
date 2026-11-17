@@ -12,7 +12,7 @@ ctx = mol.context("how do we roll back a bad deploy?", budget=400)
 print(ctx["context"])                # only the sections that answer it, never over 400 tokens
 ```
 
-Works as an **MCP server** (Claude Code, Cursor, any MCP client) and as a **Python library** (LangChain, CrewAI, your own agent). No API keys, no cloud, no PyTorch.
+Works as an **MCP server** (tested with the official MCP client; the Claude Code and Cursor setup below is documented but not yet tested end to end) and as a **Python library** (LangChain, CrewAI, your own agent). No API keys, no cloud, no PyTorch.
 
 ---
 
@@ -64,7 +64,7 @@ All numbers come from `python benchmarks/run_benchmarks.py` (real model, fresh s
 
 | | |
 |---|---|
-| Index a 5,000-line document (227 chunks) | 4.2 s |
+| Index a 5,000-line document (227 chunks) | 4.2 s on the first test machine; 5.3–5.5 s on a later one |
 | Re-index after editing one section | 0.14 s |
 | Search / `mol_context` for a new question | 3.0 ms / 3.1 ms (p50, embedding included) |
 | Cold start, new process → first answer | 0.69 s |

@@ -120,7 +120,7 @@ def test_bad_arguments_are_structured_errors(tools):
 
 def test_stdio_server_end_to_end(tmp_path):
     """Spawn the server as a subprocess and drive it with the official MCP
-    client over stdio — the same path Claude Code or Cursor uses."""
+    client over stdio — the same protocol Claude Code and Cursor speak."""
     import json
     import os
     import sys
