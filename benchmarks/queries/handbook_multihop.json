@@ -1,0 +1,10 @@
+[
+  {"query": "how do I deploy to production and what do I do if the canary looks bad", "answers": ["/deploy <service>", "deployctl rollback"]},
+  {"query": "what happens to a failing webhook delivery and how do we avoid processing duplicate events", "answers": ["HMAC-SHA256", "Idempotency-Key"]},
+  {"query": "how do I change a column safely and can the database be rolled back afterwards", "answers": ["lock_timeout", "deployctl rollback"]},
+  {"query": "when do we page someone and which availability targets drive that", "answers": ["runbook", "error budget"]},
+  {"query": "the API is down: how severe is it and who does what", "answers": ["SEV3", "incident commander"]},
+  {"query": "how do background jobs retry and why must the handlers be idempotent", "answers": ["dead-letter queue", "visibility timeout"]},
+  {"query": "what should I do in my first week and how do I get the app running", "answers": ["onboarding buddy", "make bootstrap"]},
+  {"query": "how should list endpoints page their results and why not use offset on big tables", "answers": ["maximum 200", "EXPLAIN ANALYZE"]}
+]

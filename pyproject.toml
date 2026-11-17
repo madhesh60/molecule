@@ -1,6 +1,6 @@
 [project]
 name = "molecule-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first context router and cross-session memory for AI agents — MCP server + Python API"
 readme = "README.md"
 license = { text = "MIT" }
@@ -13,13 +13,17 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "mcp[cli]>=1.0.0",
+    "mcp>=1.0.0",                # works with both 1.x (FastMCP) and 2.x (MCPServer)
     "numpy>=1.24.0",
     "tiktoken>=0.5.0",
-    "sentence-transformers>=2.2.0",
+    "onnxruntime>=1.16.0",       # runs the embedding model — no PyTorch needed
+    "tokenizers>=0.15.0",
+    "huggingface-hub>=0.20.0",
     "click>=8.0.0",
 ]
 
@@ -32,9 +36,10 @@ Issues = "https://github.com/rajmadhesh/molecule/issues"
 molecule = "molecule.cli:main"
 
 [project.optional-dependencies]
+# Only for embedding models that ship no ONNX export.
+torch = ["sentence-transformers>=2.2.0"]
 dev = [
     "pytest>=7.0.0",
-    "pytest-asyncio>=0.20.0",
     "ruff>=0.1.0",
     "build>=1.0.0",
     "twine>=4.0.0",
@@ -47,6 +52,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+molecule = ["py.typed"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
@@ -56,6 +64,9 @@ select = ["E", "F", "I"]
 ignore = ["E501"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
-asyncio_mode = "auto"
-markers = ["slow: slow integration tests (real model + real files)"]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+markers = [
+    "slow: slow integration tests (real model + real files)",
+    "model: needs the real embedding model (skipped when it is not cached)",
+]

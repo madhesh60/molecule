@@ -1,0 +1,14 @@
+[
+  {"query": "what is the weather forecast for tomorrow"},
+  {"query": "how do I cook pasta al dente"},
+  {"query": "explain the rules of cricket"},
+  {"query": "who painted the mona lisa"},
+  {"query": "what is the population of Brazil"},
+  {"query": "how to change a flat bicycle tire"},
+  {"query": "best way to learn spanish quickly"},
+  {"query": "how do I configure an nginx reverse proxy with TLS"},
+  {"query": "what is the difference between TCP and UDP"},
+  {"query": "how to center a div in CSS"},
+  {"query": "react hooks useEffect cleanup function"},
+  {"query": "kubernetes ingress controller setup"}
+]

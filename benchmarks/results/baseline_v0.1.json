@@ -1,0 +1,57 @@
+{
+  "agents_main": {
+    "n": 20,
+    "hit_at_1": 1.0,
+    "hit_at_3": 1.0,
+    "mrr_at_10": 1.0,
+    "misses_at_3": [],
+    "chunks": 26
+  },
+  "agents_adversarial": {
+    "n": 12,
+    "hit_at_1": 0.5833,
+    "hit_at_3": 1.0,
+    "mrr_at_10": 0.7361,
+    "misses_at_3": [],
+    "chunks": 26
+  },
+  "handbook_direct": {
+    "n": 48,
+    "hit_at_1": 0.9583,
+    "hit_at_3": 1.0,
+    "mrr_at_10": 0.9792,
+    "misses_at_3": [],
+    "chunks": 59
+  },
+  "handbook_paraphrase": {
+    "n": 48,
+    "hit_at_1": 0.4167,
+    "hit_at_3": 0.5417,
+    "mrr_at_10": 0.5049,
+    "misses_at_3": [
+      "where does the code that polls the carriers live",
+      "I have no idea which group is responsible for my problem, where should I post",
+      "how quickly should I look at a teammate's change after they ask me",
+      "what share of my new code has to be exercised by automated checks",
+      "how long do customers have before an old endpoint is switched off",
+      "how can a receiver be sure a callback really came from us",
+      "if someone wipes a table by mistake, how far back can we rewind",
+      "how should I name the entries I keep in the fast in-memory store",
+      "how long does a login stay valid before the app has to quietly renew it",
+      "a library we use has a serious hole, how fast must we upgrade",
+      "how do I get my merged change in front of real customers",
+      "the new version is throwing errors in prod, how do I undo it quickly",
+      "how do I ship something switched off and turn it on for a few customers first",
+      "can I push to prod on a Friday evening or over the holidays",
+      "why do only some successful calls show up in the request timeline tool",
+      "my phone keeps buzzing at night for things nobody acts on",
+      "what uptime do we promise and what happens when we miss it",
+      "the site is down right now, what are the first things I should do",
+      "does our UI have to work for people who cannot use a mouse",
+      "do I need to tell anyone before spinning up pricey servers",
+      "we are about to make a big technical choice that is hard to undo, where do we write it down",
+      "how much time are we allowed to spend cleaning up old messy code"
+    ],
+    "chunks": 59
+  }
+}

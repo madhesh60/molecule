@@ -1,8 +1,11 @@
 .molecule/
+.molecule_*/
 __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
 dist/
+build/
 *.egg-info/
 .ruff_cache/
+.venv/

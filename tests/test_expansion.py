@@ -1,7 +1,8 @@
 """Tests for concept-cluster query expansion (expansion.py + scoring tiers)."""
 from __future__ import annotations
 
-from molecule.core.expansion import SYNONYM_GROUPS, expand_terms
+from molecule.core.expansion import SYNONYM_GROUPS, cluster_id, expand_terms, siblings
+from molecule.core.normalize import stem
 from molecule.core.scoring import (
     bm25_scores,
     heading_match_score_tokens,
@@ -21,17 +22,28 @@ def test_expand_unknown_tokens_empty():
 
 def test_expand_mixed_known_unknown():
     exp = expand_terms({"remember", "zebra"})
-    assert "memory" in exp
+    assert stem("memory") in exp
     assert "zebra" not in exp
 
 
-def test_clusters_are_disjoint():
-    """A word in two clusters would make expansion order-dependent."""
-    seen: set[str] = set()
-    for group in SYNONYM_GROUPS:
-        overlap = seen & group
-        assert not overlap, f"words in multiple clusters: {overlap}"
-        seen |= group
+def test_siblings_exclude_the_term_itself():
+    deploy = stem("deploy")
+    assert deploy not in siblings(deploy)
+    assert stem("release") in siblings(deploy)
+
+
+def test_cluster_id_is_shared_within_a_cluster():
+    assert cluster_id(stem("rollback")) == cluster_id(stem("revert"))
+    assert cluster_id("zebra") is None
+
+
+def test_clusters_are_disjoint_after_stemming():
+    """A stem in two clusters would make expansion order-dependent."""
+    seen: dict[str, int] = {}
+    for index, group in enumerate(SYNONYM_GROUPS):
+        for word in group:
+            owner = seen.setdefault(stem(word), index)
+            assert owner == index, f"{word!r} (stem {stem(word)!r}) is in clusters {owner} and {index}"
 
 
 def test_bm25_paraphrase_reaches_synonym_doc():
@@ -53,7 +65,7 @@ def test_bm25_exact_match_beats_expansion():
         "sibling": "keep the secret in a vault",
     }
     scores = bm25_scores("password", docs)
-    assert scores["exact"] > scores["sibling"]
+    assert scores["exact"] > scores["sibling"] > 0.0
 
 
 def test_heading_expansion_counts_reduced():

@@ -1,0 +1,18 @@
+[
+  {"query": "what is the capital of Australia"},
+  {"query": "recipe for a sourdough bread starter"},
+  {"query": "who won the football world cup in 2018"},
+  {"query": "how tall is mount everest"},
+  {"query": "best exercises for lower back pain"},
+  {"query": "translate good morning into Japanese"},
+  {"query": "what is the boiling point of ethanol"},
+  {"query": "symptoms of vitamin D deficiency"},
+  {"query": "what is our parental leave policy"},
+  {"query": "how do I request a new laptop or a second monitor"},
+  {"query": "how are stock options vested for new hires"},
+  {"query": "what GraphQL schema stitching approach do we use"},
+  {"query": "how to train a neural network with pytorch lightning"},
+  {"query": "how do I expense a conference ticket"},
+  {"query": "what is the office wifi password"},
+  {"query": "which planets in the solar system have rings"}
+]

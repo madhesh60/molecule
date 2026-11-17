@@ -1,20 +1,35 @@
-"""
-memory.py — expose default_llm_fn for merge_duplicates callers
+"""memory.py — the small notebook of durable facts.
+
+Every write goes through the same gate, in this order:
+
+  1. **Redact** anything that looks like a secret — nothing sensitive is
+     ever persisted.
+  2. **Dedup** — a fact that says the same thing as an existing one
+     (cosine ≥ dedup_threshold) is skipped.
+  3. **Conflict** — a fact on the same topic that contradicts an old one
+     retires it (`status='replaced'`, `superseded_by` → the new fact).
+     History is kept, so "what did we believe before?" stays answerable.
+  4. **Expiry** — `task_state` facts get an `expires_at`; preferences don't.
+
+Low-confidence facts are stored with a lower retrieval weight so a guess
+never outranks something the user stated directly. The notebook is bounded:
+past `max_active_memories`, the least valuable facts (low confidence, never
+recalled, oldest) are evicted first.
 """
 from __future__ import annotations
 
 import re
 import sqlite3
 import uuid
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Callable
 
 import numpy as np
 
 from molecule.config import MoleculeConfig
-from molecule.core.embedder import cosine_similarity, embed, embed_query, load_embeddings
-from molecule.core.scoring import bm25_scores
-from molecule.db import utc_now, utc_now_iso
+from molecule.core.embedder import embedder_for
+from molecule.core.retriever import clamp_k, memory_corpus, score_memories
+from molecule.db import transaction, utc_now, utc_now_iso
 
 _SECRET_RE = re.compile(
     r"(sk-[A-Za-z0-9_-]{20,}"                      # OpenAI/Anthropic-style keys
@@ -34,9 +49,17 @@ _CONFLICT_WORDS = re.compile(
     re.IGNORECASE,
 )
 
+_VALID_MEM_TYPES = {"preference", "task_state"}
+_LOW_CONFIDENCE_WEIGHT = 0.6
+_MAX_MEMORY_CHARS = 2000
 
-def _redact(text: str) -> str:
+
+def redact(text: str) -> str:
+    """Replace anything that looks like a credential with [REDACTED]."""
     return _SECRET_RE.sub("[REDACTED]", text)
+
+
+_redact = redact  # backwards-compatible private name
 
 
 def _looks_conflicting(new_text: str) -> bool:
@@ -44,7 +67,7 @@ def _looks_conflicting(new_text: str) -> bool:
 
 
 def default_llm_fn(texts: list[str]) -> list[str]:
-    """Fallback merge: join texts with a separator, return first sentence of combined."""
+    """Fallback merge without an LLM: keep the first sentence of each group."""
     results = []
     for text in texts:
         first = text.split(".")[0].strip().replace("\n", " ")
@@ -52,15 +75,41 @@ def default_llm_fn(texts: list[str]) -> list[str]:
     return results
 
 
-def expire_stale(conn: sqlite3.Connection) -> None:
-    conn.execute(
+def expire_stale(conn: sqlite3.Connection) -> int:
+    """Retire memories whose expiry has passed. Returns how many."""
+    cursor = conn.execute(
         "UPDATE memories SET status='replaced' "
         "WHERE expires_at IS NOT NULL AND expires_at < datetime('now') AND status='active'"
     )
     conn.commit()
+    return cursor.rowcount
 
 
-_VALID_MEM_TYPES = {"preference", "task_state"}
+def enforce_capacity(conn: sqlite3.Connection, config: MoleculeConfig) -> int:
+    """Evict the least valuable active memories beyond `max_active_memories`.
+
+    Value order: low confidence first, then never-recalled, then oldest —
+    the same idea as a cache's eviction policy, applied to facts."""
+    active = conn.execute("SELECT COUNT(*) FROM memories WHERE status='active'").fetchone()[0]
+    excess = active - config.max_active_memories
+    if excess <= 0:
+        return 0
+    victims = [
+        r[0] for r in conn.execute(
+            "SELECT m.memory_id FROM memories m "
+            "LEFT JOIN memory_stats s ON s.memory_id = m.memory_id "
+            "WHERE m.status='active' "
+            "ORDER BY m.confidence ASC, COALESCE(s.hits, 0) ASC, m.created_at ASC LIMIT ?",
+            (excess,),
+        )
+    ]
+    now = utc_now_iso()
+    conn.executemany(
+        "UPDATE memories SET status='evicted', updated_at=? WHERE memory_id=?",
+        [(now, memory_id) for memory_id in victims],
+    )
+    conn.commit()
+    return len(victims)
 
 
 def write_memory(
@@ -71,34 +120,33 @@ def write_memory(
     config: MoleculeConfig,
     mem_type: str = "preference",
 ) -> dict:
+    """Store one fact (redact → dedup → conflict → insert)."""
     if mem_type not in _VALID_MEM_TYPES:
         return {"error": f"invalid mem_type: {mem_type!r} (use 'preference' or 'task_state')"}
     # Clamp instead of erroring — callers (and LLMs) send 90 meaning 0.9.
     confidence = max(0.0, min(1.0, float(confidence)))
 
-    clean = _redact(text.strip())
+    clean = redact((text or "").strip())[:_MAX_MEMORY_CHARS]
     if not clean:
         return {"error": "empty text after redaction"}
 
-    vec = embed([clean], config.embedding_model)[0]
+    embedder = embedder_for(config)
+    vec = embedder.encode([clean], config.chunk_embed_tokens)[0]
 
-    ids, matrix = load_embeddings(conn, "memories", "memory_id", filter_clause="status='active'")
-
-    if ids:
-        sims = cosine_similarity(vec, matrix)
-        best_idx = int(np.argmax(sims))
-        best_sim = float(sims[best_idx])
-
+    replaced: str | None = None
+    corpus = memory_corpus(conn, config)
+    if corpus.ids and corpus.matrix.shape[1] == vec.shape[0]:
+        sims = corpus.matrix @ vec
+        best = int(np.argmax(sims))
+        best_sim = float(sims[best])
+        conflicting = _looks_conflicting(clean)
         # Dedup: near-identical AND not contradicting → skip.
-        # Conflict: same topic (>= conflict_threshold) AND contradicting →
-        # retire the old fact (status='replaced', history kept) and store the new one.
-        if best_sim >= config.dedup_threshold and not _looks_conflicting(clean):
-            return {"skipped": "duplicate", "similar_to": ids[best_idx], "similarity": best_sim}
-        if best_sim >= config.conflict_threshold and _looks_conflicting(clean):
-            conn.execute(
-                "UPDATE memories SET status='replaced' WHERE memory_id=?",
-                (ids[best_idx],),
-            )
+        if best_sim >= config.dedup_threshold and not conflicting:
+            return {"skipped": "duplicate", "similar_to": corpus.ids[best],
+                    "similarity": round(best_sim, 4)}
+        # Conflict: same topic AND contradicting → retire the old fact.
+        if best_sim >= config.conflict_threshold and conflicting:
+            replaced = corpus.ids[best]
 
     memory_id = str(uuid.uuid4())
     now = utc_now_iso()
@@ -107,18 +155,27 @@ def write_memory(
         expires_at = (utc_now() + timedelta(days=config.task_state_expiry_days)).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
+    weight = 1.0 if confidence >= config.low_confidence_threshold else _LOW_CONFIDENCE_WEIGHT
 
-    weight = 1.0 if confidence >= config.low_confidence_threshold else 0.6
-
-    conn.execute(
-        """INSERT INTO memories
-           (memory_id, text, source_task, confidence, type, status, weight, embedding, created_at, expires_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?)""",
-        (memory_id, clean, source_task, confidence, mem_type, "active", weight,
-         vec.tobytes(), now, expires_at),
-    )
-    conn.commit()
-    return {"memory_id": memory_id, "stored": True}
+    with transaction(conn):
+        conn.execute(
+            """INSERT INTO memories
+               (memory_id, text, source_task, confidence, type, status, weight, embedding,
+                embedding_model, created_at, updated_at, expires_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (memory_id, clean, source_task, confidence, mem_type, "active", weight,
+             vec.tobytes(), embedder.name, now, now, expires_at),
+        )
+        if replaced:
+            conn.execute(
+                "UPDATE memories SET status='replaced', superseded_by=?, updated_at=? "
+                "WHERE memory_id=?",
+                (memory_id, now, replaced),
+            )
+    result: dict = {"memory_id": memory_id, "stored": True}
+    if replaced:
+        result["replaced"] = replaced
+    return result
 
 
 def search_memories(
@@ -127,47 +184,62 @@ def search_memories(
     conn: sqlite3.Connection,
     config: MoleculeConfig,
 ) -> list[dict]:
-    q_vec = embed_query(query, config.embedding_model)
-    ids, matrix = load_embeddings(
-        conn, "memories", "memory_id",
-        filter_clause="status='active' AND (expires_at IS NULL OR expires_at > datetime('now'))"
-    )
-    if not ids:
+    """Top-k active memories for a query. Each hit is counted, so the
+    notebook knows which facts are actually used."""
+    hits = score_memories(query, conn, config)[: clamp_k(k, config)]
+    if hits:
+        now = utc_now_iso()
+        conn.executemany(
+            "INSERT INTO memory_stats (memory_id, hits, last_hit_at) VALUES (?, 1, ?) "
+            "ON CONFLICT(memory_id) DO UPDATE SET hits = hits + 1, last_hit_at = ?",
+            [(h["memory_id"], now, now) for h in hits],
+        )
+        conn.commit()
+    return hits
+
+
+def forget_memory(conn: sqlite3.Connection, memory_id: str) -> dict:
+    """Permanently delete one memory."""
+    cursor = conn.execute("DELETE FROM memories WHERE memory_id=?", (memory_id,))
+    conn.commit()
+    if cursor.rowcount == 0:
+        return {"error": f"memory_id not found: {memory_id}"}
+    return {"deleted": memory_id}
+
+
+def memory_history(conn: sqlite3.Connection, memory_id: str) -> list[dict]:
+    """The chain of facts that replaced each other, oldest first, for the
+    topic `memory_id` belongs to."""
+    row = conn.execute(
+        "SELECT memory_id FROM memories WHERE memory_id=?", (memory_id,)
+    ).fetchone()
+    if not row:
         return []
-
-    sims = cosine_similarity(q_vec, matrix)
-
-    meta = {
-        r["memory_id"]: r
-        for r in conn.execute(
-            f"SELECT memory_id, text, confidence, weight FROM memories "
-            f"WHERE memory_id IN ({','.join('?'*len(ids))})",
-            ids,
-        ).fetchall()
-    }
-    kw_scores = bm25_scores(query, {mid: m["text"] for mid, m in meta.items()})
-
-    scored = []
-    for i, mid in enumerate(ids):
-        m = meta.get(mid)
-        if not m:
-            continue
-        emb_s = float(sims[i])
-        kw_s = kw_scores.get(mid, 0.0)
-        score = (config.emb_weight * emb_s + config.keyword_weight * kw_s) * float(m["weight"] or 1.0)
-        reason = f"similarity: {emb_s:.2f}"
-        if kw_s > 0:
-            reason += f", keyword: {kw_s:.2f}"
-        scored.append({
-            "memory_id": mid,
-            "text": m["text"],
-            "confidence": m["confidence"],
-            "score": score,
-            "reason": reason,
-        })
-
-    scored.sort(key=lambda x: x["score"], reverse=True)
-    return scored[:k]
+    # Walk back to the oldest ancestor, then forward along superseded_by.
+    oldest, seen = memory_id, {memory_id}
+    while True:
+        parent = conn.execute(
+            "SELECT memory_id FROM memories WHERE superseded_by=? LIMIT 1", (oldest,)
+        ).fetchone()
+        if not parent or parent[0] in seen:
+            break
+        oldest = parent[0]
+        seen.add(oldest)
+    chain: list[dict] = []
+    current: str | None = oldest
+    visited: set[str] = set()
+    while current and current not in visited:
+        visited.add(current)
+        item = conn.execute(
+            "SELECT memory_id, text, status, confidence, created_at, superseded_by "
+            "FROM memories WHERE memory_id=?",
+            (current,),
+        ).fetchone()
+        if not item:
+            break
+        chain.append(dict(item))
+        current = item["superseded_by"]
+    return chain
 
 
 def merge_duplicates(
@@ -175,41 +247,39 @@ def merge_duplicates(
     config: MoleculeConfig,
     llm_fn: Callable[[list[str]], list[str]],
 ) -> int:
-    ids, matrix = load_embeddings(conn, "memories", "memory_id", filter_clause="status='active'")
-    if len(ids) < 2:
+    """Collapse clusters of near-duplicate memories into one fact each.
+    `llm_fn` turns the joined texts of a cluster into a single sentence."""
+    corpus = memory_corpus(conn, config)
+    if len(corpus.ids) < 2:
         return 0
+    similarity = corpus.matrix @ corpus.matrix.T
 
     merged_count = 0
-    used: set[str] = set()
-
-    for i in range(len(ids)):
-        if ids[i] in used:
+    used: set[int] = set()
+    for i in range(len(corpus.ids)):
+        if i in used:
             continue
-        cluster = [i]
-        for j in range(i + 1, len(ids)):
-            if ids[j] in used:
-                continue
-            sim = float(np.dot(matrix[i], matrix[j]))
-            if sim > config.conflict_threshold:
-                cluster.append(j)
-
+        cluster = [i] + [
+            j for j in range(i + 1, len(corpus.ids))
+            if j not in used and similarity[i, j] > config.conflict_threshold
+        ]
         if len(cluster) < 2:
             continue
-
-        cluster_ids = [ids[c] for c in cluster]
-        texts = [
-            r["text"] for r in conn.execute(
-                f"SELECT text FROM memories WHERE memory_id IN ({','.join('?'*len(cluster_ids))})",
-                cluster_ids,
-            ).fetchall()
-        ]
-        merged_text = llm_fn(["\n".join(texts)])[0]
-        for cid in cluster_ids:
-            conn.execute("UPDATE memories SET status='replaced' WHERE memory_id=?", (cid,))
-            used.add(cid)
-
-        write_memory(merged_text, "merge_duplicates", 0.9, conn, config)
+        used.update(cluster)
+        merged_text = llm_fn(["\n".join(corpus.texts[c] for c in cluster)])[0]
+        cluster_ids = [corpus.ids[c] for c in cluster]
+        now = utc_now_iso()
+        conn.executemany(
+            "UPDATE memories SET status='replaced', updated_at=? WHERE memory_id=?",
+            [(now, memory_id) for memory_id in cluster_ids],
+        )
+        conn.commit()
+        result = write_memory(merged_text, "merge_duplicates", 0.9, conn, config)
+        if result.get("memory_id"):
+            conn.executemany(
+                "UPDATE memories SET superseded_by=? WHERE memory_id=?",
+                [(result["memory_id"], memory_id) for memory_id in cluster_ids],
+            )
+            conn.commit()
         merged_count += 1
-
-    conn.commit()
     return merged_count
